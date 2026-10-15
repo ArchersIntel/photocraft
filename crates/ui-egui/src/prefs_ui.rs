@@ -861,6 +861,51 @@ pub fn is_modifier_key(key: egui::Key) -> bool {
 
 // ------------------------------------------------------------------ menu routing
 
+/// The Generative Fill dialog: starts from the saved server settings (Preferences ›
+/// Integrations) and, when the server answers, offers its models in a menu (the saved one if the
+/// server has it, else an inpainting checkpoint, else the first). When it doesn't answer, the
+/// model stays a text box and the dialog says why.
+fn generative_fill_dialog(app: &mut PhotocraftApp, id: &str) -> Option<u64> {
+    let saved = app.session.prefs().integrations.clone();
+    let mut spec = photocraft_engine::commands::find(id)?.params.to_string();
+    let mut model = saved.generative_fill_model.clone();
+    let note = match app.session.execute("edit.generativeFill.models", json!({})) {
+        Ok(v) => {
+            let names: Vec<String> =
+                v["models"].as_array().into_iter().flatten().filter_map(Value::as_str).filter(|n| !n.contains(['|', '"'])).map(str::to_string).collect();
+            let server = v["host"].as_str().unwrap_or_default().to_string();
+            if names.is_empty() {
+                format!("{server} has no models installed")
+            } else {
+                let chosen = [Some(saved.generative_fill_model.as_str()), v["default"].as_str()]
+                    .into_iter()
+                    .flatten()
+                    .find(|m| names.iter().any(|n| n == m))
+                    .unwrap_or(names[0].as_str())
+                    .to_string();
+                spec = spec.replace("\"model\":text", &format!("\"model\":\"{}\"=\"{chosen}\"", names.join("|")));
+                model = chosen;
+                format!("{} models found on {server}", names.len())
+            }
+        }
+        Err(e) => format!("Couldn't list models: {e}"),
+    };
+    let d = crate::filter_dialog::open_with_spec(app, id, "Generative Fill…", &spec, serde_json::Map::new());
+    if let Some(dm) = app.ui.dialog_mut(d) {
+        // No live preview: a fill is a long request to a server, not a filter.
+        dm.fields.remove("__preview");
+        dm.fields.insert("backend".into(), json!(saved.generative_fill_backend.name()));
+        if !saved.generative_fill_host.trim().is_empty() {
+            dm.fields.insert("host".into(), json!(saved.generative_fill_host));
+        }
+        if !model.is_empty() {
+            dm.fields.insert("model".into(), json!(model));
+        }
+        dm.fields.insert("__note".into(), json!(note));
+    }
+    Some(d)
+}
+
 /// Shell front ends for Edit-menu commands invoked without parameters (dialogs, pickers).
 /// `None` when `id` isn't handled here.
 pub fn invoke(app: &mut PhotocraftApp, ctx: &egui::Context, id: &str, params: &Value) -> Option<Result<Value, String>> {
@@ -906,6 +951,12 @@ pub fn invoke(app: &mut PhotocraftApp, ctx: &egui::Context, id: &str, params: &V
                 }
             }
             dialog(d)
+        }
+        "edit.generativeFill" => {
+            if !app.session.is_enabled(id) {
+                return Some(Err("Generative Fill needs a selection on a pixel layer".into()));
+            }
+            dialog(generative_fill_dialog(app, id))
         }
         "edit.contentAwareFill" => {
             if !app.session.is_enabled(id) {
@@ -1056,6 +1107,7 @@ pub fn body(app: &mut PhotocraftApp, ui: &mut egui::Ui, f: &mut Map<String, Valu
             let mut info = app.perf.gpu_info.lines();
             info.extend(gpu_memory_lines(app));
             f.insert("__gpuInfo".into(), json!(info));
+            refresh_generative_models(app, ui.ctx(), f);
             let system = system_theme(app, ui.ctx());
             prefs_body(ui, f, system);
         }
@@ -1149,6 +1201,8 @@ fn choice_label(v: &str) -> String {
         "16" => "16 Bits/Channel".into(),
         "postScript" => "PostScript (72 points/inch)".into(),
         "traditional" => "Traditional (72.27 points/inch)".into(),
+        "comfyui" => "ComfyUI".into(),
+        "a1111" => "AUTOMATIC1111 / Forge / SD.Next".into(),
         "vulkan" => "Vulkan".into(),
         "dx12" => "DirectX 12".into(),
         "metal" => "Metal".into(),
@@ -1547,6 +1601,41 @@ fn interface_groups(ui: &mut egui::Ui, obj: &mut Map<String, Value>, keys: &[Str
 /// Where a clicked colour swatch leaves its preference path and label for the dialog body, which
 /// holds the fields the Color Picker request goes in.
 const PICK_ID: &str = "prefs-pick-color";
+/// Where the Preferences dialog publishes the Generative Fill model list for [`field_rows`]
+/// (`(models, note)`), and the flag its Refresh button raises.
+const GF_MODELS_ID: &str = "prefs-gf-models";
+const GF_REFRESH_ID: &str = "prefs-gf-refresh";
+
+/// Keep the Generative Fill model list of the Integrations section current: ask the server named
+/// in the (unsaved) settings once when the section is shown and again on Refresh, and publish the
+/// answer for the model row. A server that doesn't answer leaves an empty list and the reason, so
+/// the row falls back to a text box and the panel doesn't ask again every frame.
+fn refresh_generative_models(app: &mut PhotocraftApp, ctx: &egui::Context, f: &mut Map<String, Value>) {
+    if f.get("section").and_then(Value::as_str) != Some("integrations") {
+        return;
+    }
+    let asked = ctx.data_mut(|d| d.remove_temp::<bool>(egui::Id::new(GF_REFRESH_ID))).unwrap_or(false);
+    if asked {
+        f.remove("__gfModels");
+    }
+    if !f.contains_key("__gfModels") {
+        let draft = f.get("values").and_then(|v| v.get("integrations")).cloned().unwrap_or(Value::Null);
+        let params = json!({"backend": draft["generativeFillBackend"], "host": draft["generativeFillHost"]});
+        let (models, note) = match app.session.execute("edit.generativeFill.models", params) {
+            Ok(v) => {
+                let models: Vec<String> = v["models"].as_array().into_iter().flatten().filter_map(Value::as_str).map(str::to_string).collect();
+                let note = format!("{} models found on {}", models.len(), v["host"].as_str().unwrap_or_default());
+                (models, note)
+            }
+            Err(e) => (Vec::new(), format!("Couldn't list models: {e}")),
+        };
+        f.insert("__gfModels".into(), json!(models));
+        f.insert("__gfNote".into(), json!(note));
+    }
+    let models: Vec<String> = f.get("__gfModels").and_then(Value::as_array).into_iter().flatten().filter_map(Value::as_str).map(str::to_string).collect();
+    let note = f.get("__gfNote").and_then(Value::as_str).unwrap_or_default().to_string();
+    ctx.data_mut(|d| d.insert_temp(egui::Id::new(GF_MODELS_ID), (models, note)));
+}
 
 /// The colour swatch clicked this frame, if any: (preference path, label).
 fn ctx_take_pick(ui: &egui::Ui) -> Option<(String, String)> {
@@ -1625,6 +1714,37 @@ fn field_rows(ui: &mut egui::Ui, section: &str, obj: &mut Map<String, Value>, ke
                 pairs.extend(crate::i18n::Lang::all().map(|l| (l.code().to_string(), l.name())));
                 let mut cur = s.clone();
                 crate::widgets::dropdown(ui, &format!("pref-{path}"), &mut cur, &pairs, 220.0);
+                obj.insert(k, json!(cur));
+            }
+            // The models the server has, as a menu; "Automatic" leaves it to the fill (Flux Fill,
+            // else an inpainting model). Without a list (no server answered) a text box.
+            Value::String(s) if path == "integrations.generativeFillModel" => {
+                ui.label(RichText::new(tl!(&label)).color(t.text_dim));
+                let (models, note): (Vec<String>, String) = ui.ctx().data(|d| d.get_temp(egui::Id::new(GF_MODELS_ID))).unwrap_or_default();
+                let mut cur = s.clone();
+                ui.vertical(|ui| {
+                    ui.horizontal(|ui| {
+                        if models.is_empty() {
+                            ui.add(egui::TextEdit::singleline(&mut cur).desired_width(260.0));
+                        } else {
+                            let auto = tl!("Automatic (the server's choice)");
+                            let mut pairs: Vec<(String, &str)> = vec![(String::new(), auto)];
+                            pairs.extend(models.iter().map(|m| (m.clone(), m.as_str())));
+                            // A saved model the server no longer lists stays selectable.
+                            let saved = cur.clone();
+                            if !saved.is_empty() && !models.contains(&saved) {
+                                pairs.push((saved.clone(), saved.as_str()));
+                            }
+                            crate::widgets::dropdown_literal(ui, &format!("pref-{path}"), &mut cur, &pairs, 260.0);
+                        }
+                        if ui.small_button(tl!("Refresh")).clicked() {
+                            ui.ctx().data_mut(|d| d.insert_temp(egui::Id::new(GF_REFRESH_ID), true));
+                        }
+                    });
+                    if !note.is_empty() {
+                        ui.label(RichText::new(note).color(t.text_faint));
+                    }
+                });
                 obj.insert(k, json!(cur));
             }
             Value::String(s) if prefs::choices(&path).is_some() => {
@@ -3476,10 +3596,12 @@ mod tests {
         let values = prefs::Preferences::default().to_json();
         assert!(has_visible_fields(&values, "general"));
         assert!(has_visible_fields(&values, "fileHandling"));
-        // Every setting of these sections is still unimplemented.
-        for section in ["integrations", "scratchDisks"] {
-            assert!(!has_visible_fields(&values, section), "{section}");
-        }
+        // Every setting of this section is still unimplemented.
+        assert!(!has_visible_fields(&values, "scratchDisks"));
+        // Integrations holds the live Generative Fill server settings; agent control stays hidden.
+        assert!(has_visible_fields(&values, "integrations"));
+        assert!(!prefs::is_hidden("integrations.generativeFillHost"));
+        assert!(prefs::is_hidden("integrations.allowAgentControl"));
         // "Fill new type layers with placeholder text" and "Use Escape to Commit" are live; other Type rows stay hidden.
         assert!(has_visible_fields(&values, "type"));
         assert!(!prefs::is_hidden("type.fillNewTypeLayersWithPlaceholder"));
@@ -3971,6 +4093,95 @@ mod tests {
         autosave_now(&mut app);
         tick(&mut app, &ctx);
         assert_eq!(take(), [format!("discard {}", ids[0]), format!("save {}", ids[1])]);
+    }
+
+    /// The Generative Fill dialog starts from the saved server settings, asks that server for
+    /// its models and offers them in a menu; with no server it says why and keeps a text box.
+    #[test]
+    fn generative_fill_dialog_lists_the_servers_models() {
+        use std::io::{Read, Write};
+        let listener = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
+        let host = listener.local_addr().unwrap().to_string();
+        let server = std::thread::spawn(move || {
+            let (mut sock, _) = listener.accept().unwrap();
+            let mut buf = [0u8; 4096];
+            let _ = sock.read(&mut buf).unwrap();
+            let body =
+                json!({"CheckpointLoaderSimple": {"input": {"required": {"ckpt_name": [["plain.safetensors", "fill-inpainting.safetensors"]]}}}}).to_string();
+            write!(sock, "HTTP/1.1 200 OK\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{body}", body.len()).unwrap();
+        });
+        let (mut app, _) = app_with_store();
+        let ctx = egui::Context::default();
+        app.run("file.new", json!({"width": 32, "height": 32})).unwrap();
+        app.sync_views();
+        app.run("select.rect", json!({"x": 4, "y": 4, "width": 8, "height": 8})).unwrap();
+        app.run("prefs.set", json!({"path": "integrations.generativeFillHost", "value": host})).unwrap();
+        let d = crate::menus::invoke(&mut app, &ctx, "edit.generativeFill", json!({})).unwrap()["dialog"].as_u64().unwrap();
+        server.join().unwrap();
+        let dm = app.ui.dialogs.iter().find(|x| x.id == d).unwrap();
+        assert_eq!(dm.fields["backend"], "comfyui");
+        assert_eq!(dm.fields["host"], json!(host));
+        assert_eq!(dm.fields["model"], "fill-inpainting.safetensors", "prefers an inpainting checkpoint");
+        assert!(dm.fields["__note"].as_str().unwrap().starts_with("2 models found"), "{:?}", dm.fields["__note"]);
+        assert!(!dm.fields.contains_key("__preview"));
+        let spec = dm.fields["__spec"].as_str().unwrap();
+        assert!(spec.contains("\"model\":\"plain.safetensors|fill-inpainting.safetensors\""), "{spec}");
+
+        // Nothing listening: the dialog still opens, with the reason, and a text box for the model.
+        let closed = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
+        let gone = closed.local_addr().unwrap().to_string();
+        drop(closed);
+        app.run("prefs.set", json!({"path": "integrations.generativeFillHost", "value": gone})).unwrap();
+        let d = crate::menus::invoke(&mut app, &ctx, "edit.generativeFill", json!({})).unwrap()["dialog"].as_u64().unwrap();
+        let dm = app.ui.dialogs.iter().find(|x| x.id == d).unwrap();
+        assert!(dm.fields["__note"].as_str().unwrap().starts_with("Couldn't list models"), "{:?}", dm.fields["__note"]);
+        assert!(dm.fields["__spec"].as_str().unwrap().contains("\"model\":text"));
+    }
+
+    /// Preferences › Integrations offers the server's models too: fetched once when the section
+    /// is shown (from the unsaved host), again on Refresh, and an empty list with the reason when
+    /// the server doesn't answer.
+    #[test]
+    fn integrations_section_lists_the_servers_models() {
+        use std::io::{Read, Write};
+        let listener = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
+        let host = listener.local_addr().unwrap().to_string();
+        let server = std::thread::spawn(move || {
+            let (mut sock, _) = listener.accept().unwrap();
+            let mut buf = [0u8; 4096];
+            let _ = sock.read(&mut buf).unwrap();
+            let body = json!({"CheckpointLoaderSimple": {"input": {"required": {"ckpt_name": [["a.safetensors", "b-inpaint.safetensors"]]}}}}).to_string();
+            write!(sock, "HTTP/1.1 200 OK\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{body}", body.len()).unwrap();
+        });
+        let (mut app, _) = app_with_store();
+        let ctx = egui::Context::default();
+        let d = open_preferences(&mut app, "integrations");
+        let mut f = app.ui.dialogs.iter().find(|x| x.id == d).unwrap().fields.clone();
+        let models = |ctx: &egui::Context| ctx.data(|d| d.get_temp::<(Vec<String>, String)>(egui::Id::new(GF_MODELS_ID))).unwrap();
+        // Another section: nothing is fetched.
+        f.insert("section".into(), json!("general"));
+        refresh_generative_models(&mut app, &ctx, &mut f);
+        assert!(!f.contains_key("__gfModels"));
+        // Integrations, with the host typed but not saved yet, and the backend left at ComfyUI.
+        f.insert("section".into(), json!("integrations"));
+        f["values"]["integrations"]["generativeFillHost"] = json!(host);
+        refresh_generative_models(&mut app, &ctx, &mut f);
+        server.join().unwrap();
+        let (list, note) = models(&ctx);
+        assert_eq!(list, ["a.safetensors", "b-inpaint.safetensors"]);
+        assert!(note.starts_with("2 models found"), "{note}");
+        // Drawing again doesn't ask again (the server is gone now).
+        refresh_generative_models(&mut app, &ctx, &mut f);
+        assert_eq!(models(&ctx).0.len(), 2);
+        // Refresh asks again: nothing answers, so the list is empty and says why.
+        ctx.data_mut(|d| d.insert_temp(egui::Id::new(GF_REFRESH_ID), true));
+        refresh_generative_models(&mut app, &ctx, &mut f);
+        let (list, note) = models(&ctx);
+        assert!(list.is_empty() && note.starts_with("Couldn't list models"), "{note}");
+        // The model is a normal preference: saved with the rest.
+        f["values"]["integrations"]["generativeFillModel"] = json!("b-inpaint.safetensors");
+        confirm(&mut app, &f).unwrap();
+        assert_eq!(app.session.prefs().integrations.generative_fill_model, "b-inpaint.safetensors");
     }
 
     #[test]

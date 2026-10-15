@@ -4781,6 +4781,7 @@ dependencies = [
 name = "photocraft-engine"
 version = "0.9.0"
 dependencies = [
+ "base64 0.22.1",
  "blake3",
  "craft-print",
  "exr",

@@ -102,6 +102,11 @@
 	Conditional Mode Change…	Feltételes módváltás…
 	Contact Sheet II…	Kontaktlap II…
 	Content-Aware Fill…	Tartalomérzékeny kitöltés…
+	Generative Fill…	Generatív kitöltés…
+	Generative Remove	Generatív eltávolítás
+	Refresh	Frissítés
+	Automatic (the server's choice)	Automatikus (a kiszolgáló választása)
+	Generative Fill needs a selection on a pixel layer	A generatív kitöltéshez kijelölés szükséges egy pixelrétegen
 	Content-Aware Scale	Tartalomérzékeny méretezés
 	Convert to Profile…	Átalakítás profilra…
 	Copy	Másolás
@@ -3135,6 +3140,11 @@ cameraRaw	Yellow	Sárga
 	Content-Aware Move Tool	Tartalomérzékeny mozgatás
 	Contract	Szűkítés
 	Control port	Vezérlőport
+	Generative fill backend	Generatív kitöltés: kiszolgáló típusa
+	Generative fill host	Generatív kitöltés: gazdagép
+	Generative fill model	Generatív kitöltés: modell
+	ComfyUI	ComfyUI
+	AUTOMATIC1111 / Forge / SD.Next	AUTOMATIC1111 / Forge / SD.Next
 	Convert Point Tool	Pontátalakító
 	Convert to Linked	Átalakítás csatolttá
 	Convert to Profile	Átalakítás profilra

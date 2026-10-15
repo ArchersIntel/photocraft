@@ -742,9 +742,15 @@ pub fn body(ui: &mut egui::Ui, f: &mut Map<String, Value>) {
             }
             Kind::Text => {
                 let mut v = f.get(&p.key).and_then(Value::as_str).unwrap_or_default().to_string();
+                // Prompts are sentences: a few lines that wrap, not one narrow row.
+                let multiline = p.key.to_ascii_lowercase().ends_with("prompt");
                 ui.horizontal(|ui| {
                     ui.label(egui::RichText::new(label(&p.key)).color(t.text_dim));
-                    ui.add(egui::TextEdit::singleline(&mut v).desired_width(200.0));
+                    if multiline {
+                        ui.add(egui::TextEdit::multiline(&mut v).desired_rows(3).desired_width(320.0));
+                    } else {
+                        ui.add(egui::TextEdit::singleline(&mut v).desired_width(200.0));
+                    }
                 });
                 if v.is_empty() {
                     f.remove(&p.key);
@@ -2414,5 +2420,28 @@ mod tests {
         let px = |x: i32| doc.layers[0].surface().unwrap().read_region(photocraft_geom::Rect::new(x, 5, x + 1, 6));
         assert!(px(2)[1] > 0.5, "near the point: shifted to green {:?}", px(2));
         assert!(px(38)[0] > 0.9 && px(38)[1] < 0.1, "far away: still red {:?}", px(38));
+    }
+}
+
+#[cfg(test)]
+mod generative_fill_spec_tests {
+    use super::*;
+
+    /// The prompt, host and model are text boxes, not number inputs (a number there is the
+    /// engine's "must be text" error), and the choices stay choices.
+    #[test]
+    fn generative_fill_params_are_text_boxes_and_menus() {
+        let spec = photocraft_engine::commands::find("edit.generativeFill").expect("command").params;
+        let kinds: std::collections::HashMap<String, Kind> = parse_spec(spec).into_iter().map(|p| (p.key, p.kind)).collect();
+        for key in ["prompt", "negativePrompt", "host", "model"] {
+            assert_eq!(kinds.get(key), Some(&Kind::Text), "{key}");
+        }
+        assert!(matches!(kinds.get("backend"), Some(Kind::Choice { options, .. }) if options == &["comfyui", "a1111"]));
+        assert!(matches!(kinds.get("output"), Some(Kind::Choice { .. })));
+        assert!(matches!(kinds.get("steps"), Some(Kind::Range { .. })));
+        // With a model list, the replaced notation parses as a menu defaulting to the chosen one.
+        let with_models = spec.replace("\"model\":text", "\"model\":\"a.safetensors|b-inpaint.safetensors\"=\"b-inpaint.safetensors\"");
+        let model = parse_spec(&with_models).into_iter().find(|p| p.key == "model").expect("model");
+        assert!(matches!(model.kind, Kind::Choice { default: Some(d), options } if d == "b-inpaint.safetensors" && options.len() == 2));
     }
 }
