@@ -2685,6 +2685,24 @@ cameraData	Lens	Objektiv
 	Snap to Origin	An Ursprung ausrichten
 	Search settings…	Einstellungen durchsuchen…
 	No matching settings	Keine passenden Einstellungen
+# Edit › Content-Aware Fill workspace
+	Sampling Brush Tool	Aufnahmepinsel-Werkzeug
+	Sampling Area Overlay	Überlagerung des Aufnahmebereichs
+	Show Sampling Area	Aufnahmebereich einblenden
+	Indicates	Kennzeichnet
+	Sampling Area	Aufnahmebereich
+	Excluded Area	Ausgeschlossener Bereich
+	Sampling Area Options	Optionen für Aufnahmebereich
+	Rectangular	Rechteckig
+	Fill Settings	Füllungseinstellungen
+	Rotation Adaptation	Drehungsanpassung
+	Very High	Sehr hoch
+	Full	Voll
+	Mirror	Spiegeln
+	Output Settings	Ausgabeeinstellungen
+	Output To	Ausgabe in
+	Duplicate Layer	Ebene duplizieren
+	Contract	Verkleinern
 	Loading fonts…	Schriften werden geladen…
 	Response curve	Reaktionskurve
 	Tool	Werkzeug
@@ -3220,3 +3238,5 @@ curves	Smooth	Glätten
 	This document's layers: {needed} of {budget} for layers	Ebenen dieses Dokuments: {needed} von {budget} für Ebenen
 	This document's layers need {needed} but may hold {budget}: whole-document redraws use the CPU	Die Ebenen dieses Dokuments brauchen {needed}, dürfen aber {budget} belegen: Das ganze Dokument wird auf der CPU neu gezeichnet
 	GPU Memory (MB, 0 = Automatic)	GPU-Speicher (MB, 0 = Automatisch)
+	{name} was changed by another app after it was opened or saved here.	{name} wurde von einer anderen App geändert, nachdem es hier geöffnet oder gespeichert wurde.
+	Replace it with this document, or cancel and use File › Save As to keep both.	Ersetze die Datei durch dieses Dokument oder brich ab und nutze Datei › Speichern unter, um beide zu behalten.

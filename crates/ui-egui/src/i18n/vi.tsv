@@ -3607,6 +3607,22 @@ curves	Smooth	Làm mượt
 	Remove after each stroke	Xóa sau mỗi nét vẽ
 	Apply the removal ({key})	Áp dụng việc xóa ({key})
 	Strokes to remove: {n} (Enter applies, Esc cancels)	Nét vẽ cần xóa: {n} (Enter áp dụng, Esc hủy)
+# Edit › Content-Aware Fill workspace
+	Excluded Area	Vùng loại trừ
+	Fill Settings	Cài đặt tô
+	Full	Toàn phần
+	Indicates	Biểu thị
+	Mirror	Phản chiếu
+	Output Settings	Cài đặt đầu ra
+	Output To	Đầu ra tới
+	Rectangular	Chữ nhật
+	Rotation Adaptation	Thích ứng xoay
+	Sampling Area	Vùng lấy mẫu
+	Sampling Area Options	Tùy chọn vùng lấy mẫu
+	Sampling Area Overlay	Lớp phủ vùng lấy mẫu
+	Sampling Brush Tool	Công cụ Cọ lấy mẫu
+	Show Sampling Area	Hiện vùng lấy mẫu
+	Very High	Rất cao
 	Show home recent files	Hiện tệp gần đây trên màn hình chính
 	Clear Brush Controls	Xóa điều khiển cọ
 	Reset All Locked Settings	Đặt lại tất cả cài đặt đã khóa
@@ -3704,3 +3720,6 @@ curves	Smooth	Làm mượt
 	This document's layers: {needed} of {budget} for layers	Các lớp của tài liệu này: {needed} trên {budget} dành cho lớp
 	This document's layers need {needed} but may hold {budget}: whole-document redraws use the CPU	Các lớp của tài liệu này cần {needed} nhưng chỉ được dùng {budget}: vẽ lại toàn bộ tài liệu dùng CPU
 	GPU Memory (MB, 0 = Automatic)	Bộ nhớ GPU (MB, 0 = Tự động)
+	Replace	Thay thế
+	{name} was changed by another app after it was opened or saved here.	{name} đã bị một ứng dụng khác thay đổi sau khi được mở hoặc lưu ở đây.
+	Replace it with this document, or cancel and use File › Save As to keep both.	Thay thế bằng tài liệu này, hoặc hủy và dùng Tệp › Lưu thành để giữ cả hai.

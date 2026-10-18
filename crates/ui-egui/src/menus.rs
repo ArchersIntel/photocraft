@@ -231,7 +231,11 @@ pub(crate) fn invoke_unguarded(app: &mut PhotocraftApp, ctx: &egui::Context, id:
                 None => {
                     let own = app.session.active().and_then(|d| d.path.clone().map(|p| (photocraft_engine::file_cmds::holds_at(&d.doc, &p), p, d)));
                     match own {
-                        Some((true, path, _)) => app.save_in_place(path),
+                        Some((true, path, d)) => {
+                            // Another app changed the file since it was opened or saved: ask first (#6596).
+                            let doc = d.doc.id;
+                            crate::disk_change_prompt::intercept(app, doc, &path, false).unwrap_or_else(|| app.save_in_place(path))
+                        }
                         Some((false, path, d)) if photocraft_engine::file_cmds::saves_in_place(&path) => {
                             // Its own file is layered but can't hold what the document has now.
                             let losses = photocraft_engine::file_cmds::losses_at(&d.doc, &path);
@@ -404,6 +408,13 @@ pub(crate) fn invoke_unguarded(app: &mut PhotocraftApp, ctx: &egui::Context, id:
                 ctx.memory_mut(|m| m.surrender_focus(focus));
             }
             Ok(Value::Null)
+        }
+        // Only interactive creation opens the Color Picker; it creates the layer on OK,
+        // so Cancel leaves neither an orphan layer nor an undo/redo history entry.
+        // Explicit parameters continue straight to the engine.
+        "layer.newFillLayer.solidColor" if params.as_object().is_none_or(|o| o.is_empty()) => {
+            let dialog = crate::solid_fill_ui::open_new(app).ok_or("no document is open")?;
+            Ok(json!({"dialog": dialog}))
         }
         // Solid Color fills and solid-colour shapes use the Color Picker, Pattern fills the Pattern
         // Fill dialog; other adjustment / fill / shape controls use Properties.
@@ -2079,9 +2090,11 @@ mod open_recent_tests {
         let ctx = egui::Context::default();
         invoke(&mut app, &ctx, "file.open", json!({ "path": p })).unwrap();
         assert_eq!(app.ui.recent_files.first().map(String::as_str), Some(p.as_str()));
-        // Re-open via the recent entry.
+        // Re-open via the recent entry once closed (an open file shows its tab instead, #6598).
+        app.session.close(0);
         invoke(&mut app, &ctx, "file.openRecent.0", json!({})).unwrap();
-        assert_eq!(app.session.documents().len(), 2);
+        assert_eq!(app.session.documents().len(), 1);
+        assert_eq!(app.session.active().and_then(|d| d.path.as_deref()), Some(p.as_str()));
         let _ = std::fs::remove_file(&path);
     }
 }

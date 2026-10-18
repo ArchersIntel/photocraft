@@ -3229,6 +3229,22 @@ cameraData	Lens	렌즈
 	Snap to Origin	원점에 스냅
 	Search settings…	설정 검색…
 	No matching settings	일치하는 설정 없음
+# Edit › Content-Aware Fill workspace
+	Sampling Brush Tool	샘플링 브러시 도구
+	Sampling Area Overlay	샘플링 영역 오버레이
+	Show Sampling Area	샘플링 영역 표시
+	Indicates	표시 대상
+	Sampling Area	샘플링 영역
+	Excluded Area	제외 영역
+	Sampling Area Options	샘플링 영역 옵션
+	Rectangular	사각형
+	Fill Settings	채우기 설정
+	Rotation Adaptation	회전 적응
+	Very High	매우 높음
+	Full	전체
+	Mirror	미러
+	Output Settings	출력 설정
+	Output To	출력 위치
 	Loading fonts…	글꼴 불러오는 중…
 	Response curve	응답 곡선
 	Simulate Pressure	압력 시뮬레이션
@@ -3396,3 +3412,6 @@ curves	Smooth	매끄럽게
 	This document's layers: {needed} of {budget} for layers	이 문서의 레이어: 레이어용 {budget} 중 {needed}
 	This document's layers need {needed} but may hold {budget}: whole-document redraws use the CPU	이 문서의 레이어에 {needed}가 필요하지만 {budget}만 사용할 수 있습니다: 문서 전체 다시 그리기는 CPU를 사용합니다
 	GPU Memory (MB, 0 = Automatic)	GPU 메모리(MB, 0 = 자동)
+	Replace	대치
+	{name} was changed by another app after it was opened or saved here.	{name}이(가) 여기서 열거나 저장한 뒤 다른 앱에서 변경되었습니다.
+	Replace it with this document, or cancel and use File › Save As to keep both.	이 문서로 대치하거나, 취소하고 파일 › 다른 이름으로 저장을 사용해 둘 다 보관하세요.
