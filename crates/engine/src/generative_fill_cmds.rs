@@ -135,6 +135,15 @@ fn parse_endpoint(url: &str, backend: Backend) -> Result<Endpoint> {
     if authority.is_empty() || authority.contains('@') {
         return Err(bad("the host must look like 192.168.1.20:8188 or http://myserver.local:8188"));
     }
+    // Both parts go straight into the HTTP request (the request line and the `Host` header), so
+    // anything that could end a line or start a query is refused rather than escaped: a CR or LF
+    // there would inject headers.
+    if !authority.bytes().all(|b| b.is_ascii_alphanumeric() || matches!(b, b'.' | b'-' | b'_' | b':' | b'[' | b']')) {
+        return Err(bad("the host may contain only letters, digits and . - _ : [ ]"));
+    }
+    if !path.bytes().all(|b| b.is_ascii_alphanumeric() || matches!(b, b'/' | b'-' | b'_' | b'.' | b'~')) {
+        return Err(bad("the host's path may contain only letters, digits and / - _ . ~"));
+    }
     let port_of = |p: &str| p.parse::<u16>().ok().filter(|p| *p != 0).ok_or_else(|| bad("the host's port must be 1..65535"));
     let (host, port) = match authority.strip_prefix('[') {
         // [::1]:8188
@@ -805,13 +814,23 @@ fn server(s: &Session, p: &Value) -> Result<(Backend, Endpoint)> {
 /// Edit › Generative Fill › models: ask the server which checkpoints it has, so the dialog can
 /// offer them. Short timeouts: a server that isn't there should not hang the dialog.
 fn list_models(s: &mut Session, p: &Value) -> Result<Value> {
+    // The dialogs call this on the UI thread, so the whole lookup (ComfyUI makes up to three
+    // requests) shares one short limit instead of each request having its own.
+    const LIMIT: std::time::Duration = std::time::Duration::from_secs(4);
+    if cfg!(target_arch = "wasm32") {
+        return Err(other("Generative Fill needs a model server and isn't available in the browser build"));
+    }
     let (backend, mut ep) = server(s, p)?;
     ep.connect_secs = 1;
-    ep.total_secs = 4;
+    ep.total_secs = LIMIT.as_secs();
+    let started = std::time::Instant::now();
+    let late = || started.elapsed() >= LIMIT;
+    let slow =
+        |e: EngineError| if matches!(e, EngineError::Cancelled) { other(format!("{} didn't answer within {} seconds", ep.host, LIMIT.as_secs())) } else { e };
     let names = match backend {
-        Backend::Comfy => comfy_models(&ep, &|| false)?,
+        Backend::Comfy => comfy_models(&ep, &late).map_err(slow)?,
         Backend::A1111 => {
-            let list = get_json(&ep, "/sdapi/v1/sd-models", &|| false)?;
+            let list = get_json(&ep, "/sdapi/v1/sd-models", &late).map_err(slow)?;
             list.as_array()
                 .map(|a| a.iter().filter_map(|m| m.get("title").or_else(|| m.get("model_name")).and_then(Value::as_str).map(str::to_string)).collect())
                 .unwrap_or_default()

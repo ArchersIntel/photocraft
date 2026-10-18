@@ -107,6 +107,12 @@ fn px(s: &Session, x: i32, y: i32) -> Vec<f32> {
     st.doc.layer(st.active_layer.unwrap()).unwrap().surface().unwrap().pixel(x, y)
 }
 
+/// What a rejected command must leave alone: the layers and the history.
+fn state(s: &Session) -> (usize, usize, Option<String>) {
+    let st = s.active().unwrap();
+    (layer_count(s), st.history.past_len(), st.history.undo_label().map(str::to_string))
+}
+
 fn layer_count(s: &Session) -> usize {
     s.active().unwrap().doc.walk().len()
 }
@@ -188,10 +194,12 @@ fn current_output_only_changes_selected_pixels() {
 fn only_local_network_hosts_are_allowed() {
     let mut s = session();
     rect_selection(&mut s);
+    let before = state(&s);
     for host in
         ["http://8.8.8.8:8188", "https://127.0.0.1:8188", "ftp://127.0.0.1", "http://user@127.0.0.1", "http://", "http://[::1", "1.1.1.1", "127.0.0.1:0"]
     {
         assert!(s.execute("edit.generativeFill", json!({"host": host})).is_err(), "{host}");
+        assert_eq!(state(&s), before, "{host}: a refused host changes nothing");
     }
     let err = parse_endpoint("http://8.8.8.8:8188", Backend::Comfy).unwrap_err().to_string();
     assert!(err.contains("local network"), "{err}");
@@ -219,19 +227,23 @@ fn only_local_network_hosts_are_allowed() {
 fn reports_server_errors_and_bad_params() {
     let mut s = session();
     rect_selection(&mut s);
+    let before = state(&s);
     let (host, server) = fake_server("/", |_, _, _| (500, b"{\"error\":\"out of memory\"}".to_vec()));
     let err = s.execute("edit.generativeFill", json!({"backend": "a1111", "host": host})).unwrap_err().to_string();
     server.join().unwrap();
     assert!(err.contains("500") && err.contains("out of memory"), "{err}");
+    assert_eq!(state(&s), before, "a server error changes nothing");
     // Nothing listening.
     let closed = TcpListener::bind("127.0.0.1:0").unwrap();
     let host = closed.local_addr().unwrap().to_string();
     drop(closed);
     let err = s.execute("edit.generativeFill", json!({"host": host})).unwrap_err().to_string();
     assert!(err.contains("reach"), "{err}");
+    assert_eq!(state(&s), before, "an unreachable server changes nothing");
     for p in [json!({"steps": 0}), json!({"steps": "x"}), json!({"output": 3}), json!({"prompt": 5}), json!({"resolution": 1e30}), json!({"backend": "dalle"})]
     {
         assert!(s.execute("edit.generativeFill", p.clone()).is_err(), "{p}");
+        assert_eq!(state(&s), before, "{p}: rejected parameters change nothing");
     }
 }
 
@@ -569,5 +581,72 @@ fn generative_remove_is_a_one_click_fill_with_removal_defaults() {
     let seen = server.join().unwrap();
     let req: Value = serde_json::from_slice(&seen.lock().unwrap()[0].2).unwrap();
     assert_eq!(req["prompt"], "plain sand");
+    let before = state(&s);
     assert!(s.execute("edit.generativeRemove", json!({"feather": "wide"})).is_err());
+    assert_eq!(state(&s), before, "a rejected parameter changes nothing");
+}
+
+/// The host and its path go straight into the HTTP request, so anything that could end a line or
+/// start a query is refused: a CR or LF there would inject headers.
+#[test]
+fn the_host_and_path_cannot_inject_into_the_request() {
+    let mut s = session();
+    rect_selection(&mut s);
+    let before = state(&s);
+    for bad in [
+        "127.0.0.1:8188/a\r\nX-Injected: 1",
+        "127.0.0.1:8188/a\nX: y",
+        "127.0.0.1:8188/with space",
+        "127.0.0.1:8188/path?query=1",
+        "127.0.0.1:8188/path#frag",
+        "127.0.0.1:8188/%0d%0aX: y",
+        "127.0.0.1\r\nX: y:8188",
+        "127.0.0.1 :8188",
+        "127.0.0.1:8188/a\"b",
+    ] {
+        let err = parse_endpoint(bad, Backend::Comfy).unwrap_err().to_string();
+        assert!(err.contains("may contain only"), "{bad:?}: {err}");
+        assert!(s.execute("edit.generativeFill", json!({"host": bad})).is_err(), "{bad:?}");
+        assert!(s.execute("edit.generativeFill.models", json!({"host": bad})).is_err(), "{bad:?}");
+        assert_eq!(state(&s), before, "{bad:?}");
+    }
+    // Ordinary mount paths and hosts still work.
+    for ok in ["127.0.0.1:8188/sub/path-1_x.y~z/", "localhost:8188", "[::1]:8188", "http://127.0.0.1:8188/comfy"] {
+        assert!(parse_endpoint(ok, Backend::Comfy).is_ok(), "{ok}");
+    }
+}
+
+/// The model lookup shares one short limit across its requests (it runs on the UI thread): a
+/// server that answers the first and then goes quiet costs about 4 s in all, not 4 s per request.
+#[test]
+fn listing_models_has_one_time_limit_for_all_its_requests() {
+    use std::time::{Duration, Instant};
+    let listener = TcpListener::bind("127.0.0.1:0").unwrap();
+    let host = listener.local_addr().unwrap().to_string();
+    let server = std::thread::spawn(move || {
+        // The first request is answered, and its connection closed, as a real server does.
+        let (mut first, _) = listener.accept().unwrap();
+        let mut buf = [0u8; 4096];
+        let _ = first.read(&mut buf).unwrap();
+        let body = json!({"CheckpointLoaderSimple": {"input": {"required": {"ckpt_name": [["a.safetensors"]]}}}}).to_string();
+        write!(first, "HTTP/1.1 200 OK\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{body}", body.len()).unwrap();
+        drop(first);
+        // The two lookups after it connect and are never answered.
+        let mut held = Vec::new();
+        for _ in 0..2 {
+            if let Ok((sock, _)) = listener.accept() {
+                held.push(sock);
+            }
+        }
+        std::thread::sleep(Duration::from_secs(6));
+        drop(held);
+    });
+    let mut s = session();
+    let started = Instant::now();
+    let r = s.execute("edit.generativeFill.models", json!({"backend": "comfyui", "host": host})).unwrap();
+    let took = started.elapsed();
+    assert!(took < Duration::from_secs(6), "one shared limit, not one per request (two silent lookups would take 8 s): {took:?}");
+    assert!(took >= Duration::from_secs(3), "it did wait for the silent lookups up to the limit: {took:?}");
+    assert_eq!(r["models"], json!(["a.safetensors"]), "what was answered is still returned");
+    server.join().unwrap();
 }
