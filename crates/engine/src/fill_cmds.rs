@@ -106,7 +106,7 @@ pub fn fill(s: &mut Session, p: &Value) -> Result<Value> {
     let source = match contents {
         "foreground" => color_source(s, s.tools.foreground),
         "background" => color_source(s, s.tools.background),
-        "color" => color_source(s, color_param(p, "color", s.tools.foreground)),
+        "color" => color_source(s, color_param(CMD, p, "color", s.tools.foreground)?),
         "black" => Source::Color([0.0, 0.0, 0.0, 1.0]),
         "gray" => Source::Color([128.0 / 255.0, 128.0 / 255.0, 128.0 / 255.0, 1.0]),
         "white" => Source::Color([1.0; 4]),
