@@ -89,6 +89,14 @@ impl Backend {
             Backend::Comfy => 8188,
         }
     }
+
+    /// The name `backend` parameters and Preferences use.
+    fn name(self) -> &'static str {
+        match self {
+            Backend::A1111 => "a1111",
+            Backend::Comfy => "comfyui",
+        }
+    }
 }
 
 /// A validated server address.
@@ -798,29 +806,54 @@ fn can_generate(s: &Session) -> std::result::Result<(), String> {
     crate::edit_menu_cmds::can_caf(s).map_err(|_| "make a selection on a pixel layer to generate into".to_string())
 }
 
-/// The backend and server to talk to: the command parameters, then the environment, then
-/// Preferences › Integrations.
-fn server(s: &Session, p: &Value) -> Result<(Backend, Endpoint)> {
+/// The backend and the server text to talk to, before the text is checked or resolved: the
+/// command parameters, then the environment, then Preferences › Integrations.
+fn settings(s: &Session, p: &Value) -> Result<(Backend, String)> {
     let env = |k: &str| std::env::var(k).ok().filter(|v| !v.trim().is_empty());
     let pick = |key: &str, env_key: &str| p.get(key).and_then(Value::as_str).filter(|v| !v.trim().is_empty()).map(str::to_string).or_else(|| env(env_key));
     let saved = &s.prefs().integrations;
     let backend = Backend::parse(&pick("backend", BACKEND_ENV).unwrap_or_else(|| saved.generative_fill_backend.name().to_string()))?;
-    let host = pick("host", HOST_ENV)
-        .or_else(|| Some(saved.generative_fill_host.clone()).filter(|h| !h.trim().is_empty()))
-        .unwrap_or_else(|| format!("127.0.0.1:{}", backend.default_port()));
+    let host =
+        pick("host", HOST_ENV).or_else(|| Some(saved.generative_fill_host.clone()).filter(|h| !h.trim().is_empty())).unwrap_or_else(|| default_host(backend));
+    Ok((backend, host))
+}
+
+fn server(s: &Session, p: &Value) -> Result<(Backend, Endpoint)> {
+    let (backend, host) = settings(s, p)?;
     Ok((backend, parse_endpoint(&host, backend)?))
 }
 
-/// Edit › Generative Fill › models: ask the server which checkpoints it has, so the dialog can
-/// offer them. Short timeouts: a server that isn't there should not hang the dialog.
-fn list_models(s: &mut Session, p: &Value) -> Result<Value> {
-    // The dialogs call this on the UI thread, so the whole lookup (ComfyUI makes up to three
-    // requests) shares one short limit instead of each request having its own.
+/// Where a fill goes when no host is set: this machine, on the backend's usual port.
+fn default_host(backend: Backend) -> String {
+    format!("127.0.0.1:{}", backend.default_port())
+}
+
+/// The backend (`comfyui` or `a1111`) and host text a fill with these parameters would use, so a
+/// dialog can show, and then submit, the very server it asked about (parameters, then the
+/// environment, then Preferences). Nothing is resolved or contacted.
+pub fn effective_server(s: &Session, p: &Value) -> Result<(String, String)> {
+    let (backend, host) = settings(s, p)?;
+    Ok((backend.name().to_string(), host))
+}
+
+/// The host a blank host field stands for with `backend`: the environment's, else this machine.
+pub fn default_host_for(backend: &str) -> Result<String> {
+    let backend = Backend::parse(backend)?;
+    Ok(std::env::var(HOST_ENV).ok().filter(|v| !v.trim().is_empty()).unwrap_or_else(|| default_host(backend)))
+}
+
+/// Ask a server which models it has, with no session: the dialogs run this on a worker thread
+/// (it waits on the network), so it takes only the backend and host text. The whole lookup
+/// (ComfyUI makes up to three requests) shares one short limit, and it also resolves the host
+/// name, so nothing in it blocks the interface. Returns `{backend, host, server, models,
+/// default}`: `backend` and `host` echo what was asked, `server` is the address shown to people.
+pub fn lookup_models(backend: &str, host: &str) -> Result<Value> {
     const LIMIT: std::time::Duration = std::time::Duration::from_secs(4);
     if cfg!(target_arch = "wasm32") {
         return Err(other("Generative Fill needs a model server and isn't available in the browser build"));
     }
-    let (backend, mut ep) = server(s, p)?;
+    let backend = Backend::parse(backend)?;
+    let mut ep = parse_endpoint(host, backend)?;
     ep.connect_secs = 1;
     ep.total_secs = LIMIT.as_secs();
     let started = std::time::Instant::now();
@@ -838,7 +871,14 @@ fn list_models(s: &mut Session, p: &Value) -> Result<Value> {
     };
     // What a fill with no `model` would pick.
     let default = preferred_model(&names).cloned();
-    Ok(json!({"host": ep.host, "models": names, "default": default}))
+    Ok(json!({"backend": backend.name(), "host": host, "server": ep.host, "models": names, "default": default}))
+}
+
+/// Edit › Generative Fill › models: the command form of [`lookup_models`], for the server a fill
+/// with these parameters would use.
+fn list_models(s: &mut Session, p: &Value) -> Result<Value> {
+    let (backend, host) = settings(s, p)?;
+    lookup_models(backend.name(), &host)
 }
 
 fn generative_fill(s: &mut Session, p: &Value) -> Result<Value> {

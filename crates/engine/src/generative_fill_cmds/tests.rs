@@ -650,3 +650,42 @@ fn listing_models_has_one_time_limit_for_all_its_requests() {
     assert_eq!(r["models"], json!(["a.safetensors"]), "what was answered is still returned");
     server.join().unwrap();
 }
+
+/// The dialogs show, and then submit, the server a fill would use: parameters first, then
+/// Preferences, then this machine on the backend's usual port.
+#[test]
+fn the_effective_server_is_the_one_a_fill_would_use() {
+    let mut s = session();
+    // Nothing saved: this machine, the backend's port (a developer's own environment aside).
+    if std::env::var(HOST_ENV).is_err() && std::env::var(BACKEND_ENV).is_err() {
+        assert_eq!(effective_server(&s, &json!({})).unwrap(), ("comfyui".to_string(), "127.0.0.1:8188".to_string()));
+        assert_eq!(effective_server(&s, &json!({"backend": "a1111"})).unwrap().1, "127.0.0.1:7860");
+        assert_eq!(default_host_for("a1111").unwrap(), "127.0.0.1:7860");
+    }
+    s.execute("prefs.set", json!({"path": "integrations.generativeFillBackend", "value": "a1111"})).unwrap();
+    s.execute("prefs.set", json!({"path": "integrations.generativeFillHost", "value": "192.168.1.20:7000"})).unwrap();
+    if std::env::var(HOST_ENV).is_err() && std::env::var(BACKEND_ENV).is_err() {
+        assert_eq!(effective_server(&s, &json!({})).unwrap(), ("a1111".to_string(), "192.168.1.20:7000".to_string()));
+        assert_eq!(effective_server(&s, &json!({"host": "  "})).unwrap().1, "192.168.1.20:7000", "a blank parameter is no parameter");
+    }
+    // Parameters win over what is saved.
+    assert_eq!(effective_server(&s, &json!({"backend": "comfyui", "host": "10.0.0.5:9"})).unwrap(), ("comfyui".to_string(), "10.0.0.5:9".to_string()));
+    assert!(effective_server(&s, &json!({"backend": "dalle"})).is_err());
+    assert!(default_host_for("dalle").is_err());
+}
+
+/// The lookup the dialogs run on a worker thread needs no session, echoes the server it asked,
+/// and refuses a bad backend or a public host without making a request.
+#[test]
+fn the_session_free_lookup_echoes_the_server_it_asked() {
+    let (host, server) =
+        fake_server("/sdapi/v1/sd-models", |_, _, _| (200, json!([{"title": "m1 [abc]"}, {"model_name": "m2-inpainting"}]).to_string().into_bytes()));
+    let r = lookup_models("a1111", &host).unwrap();
+    server.join().unwrap();
+    assert_eq!((r["backend"].as_str(), r["host"].as_str(), r["server"].as_str()), (Some("a1111"), Some(host.as_str()), Some(host.as_str())));
+    assert_eq!(r["models"], json!(["m1 [abc]", "m2-inpainting"]));
+    assert_eq!(r["default"], "m2-inpainting");
+    assert!(lookup_models("dalle", &host).is_err());
+    assert!(lookup_models("a1111", "8.8.8.8:7860").unwrap_err().to_string().contains("local network"));
+    assert!(lookup_models("a1111", "127.0.0.1:7860/a b").unwrap_err().to_string().contains("may contain only"));
+}
