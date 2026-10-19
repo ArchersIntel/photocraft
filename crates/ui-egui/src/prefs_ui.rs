@@ -1849,6 +1849,12 @@ fn apply_dialog_lookup(app: &mut PhotocraftApp, dialog: u64, key: &str, reply: &
                 let spec = spec.replace("\"model\":text", &format!("\"model\":\"{}\"=\"{chosen}\"", names.join("|")));
                 dm.fields.insert("__spec".into(), json!(spec));
             }
+            // A model picked here, not by the user, stands in for "no choice yet": when the server
+            // changes it is replaced by the new server's default instead of being kept as typed.
+            // A listed model the user typed or picked (`typed` differs from the seed) stays theirs.
+            if prefilled {
+                dm.fields.insert("__gfSeed".into(), json!(chosen));
+            }
             dm.fields.insert("model".into(), json!(chosen));
         }
     }
@@ -4626,6 +4632,76 @@ mod tests {
         let fields = dialog_fields(&app, d);
         assert_eq!(fields["model"], "y.safetensors");
         assert!(fields["__spec"].as_str().unwrap().contains("\"model\":\"x.safetensors|y.safetensors\"=\"y.safetensors\""), "{:?}", fields["__spec"]);
+    }
+
+    /// Run frames until the dialog has applied the lookup for `host` (its list is for that server).
+    fn frames_until_listed(app: &mut PhotocraftApp, ctx: &egui::Context, d: u64, host: &str, t: &mut f64) {
+        let want = format!("comfyui|{host}");
+        let started = std::time::Instant::now();
+        while dialog_fields(app, d).get("__gfKey").and_then(Value::as_str) != Some(want.as_str()) {
+            assert!(started.elapsed() < std::time::Duration::from_secs(8), "timed out waiting for {want}: {:?}", dialog_fields(app, d)["__note"]);
+            *t += 0.05;
+            frame_at(app, ctx, *t);
+        }
+    }
+
+    /// The model the dialog chose for one server stands in for "no choice yet": when the server
+    /// changes it is replaced by the new server's default (it isn't kept as if typed, with a stale
+    /// name in a text box). A model the user picked in the menu stays theirs: kept as it is, in
+    /// the menu when the new server lists it and as typed text when it doesn't.
+    #[test]
+    fn an_automatic_model_follows_a_server_change_but_a_picked_one_stays() {
+        // Automatic: the first server's default is replaced by the second server's.
+        let (a, sa) = one_checkpoint_list(&["a1.safetensors", "a2-inpaint.safetensors"]);
+        let (b, sb) = one_checkpoint_list(&["b1.safetensors", "b2-inpaint.safetensors"]);
+        let (mut app, ctx, d) = generative_dialog(&a);
+        let mut t = 0.0;
+        frames_until_listed(&mut app, &ctx, d, &a, &mut t);
+        assert_eq!(dialog_fields(&app, d)["model"], "a2-inpaint.safetensors", "chosen automatically");
+        app.ui.dialog_mut(d).unwrap().fields.insert("host".into(), json!(b));
+        frames_until_listed(&mut app, &ctx, d, &b, &mut t);
+        let fields = dialog_fields(&app, d);
+        assert_eq!(fields["model"], "b2-inpaint.safetensors", "the new server's default, not the old server's name");
+        assert!(
+            fields["__spec"].as_str().unwrap().contains("\"model\":\"b1.safetensors|b2-inpaint.safetensors\"=\"b2-inpaint.safetensors\""),
+            "{:?}",
+            fields["__spec"]
+        );
+        assert!(!fields["__note"].as_str().unwrap().contains("isn't one of them"), "{:?}", fields["__note"]);
+        sa.join().unwrap();
+        sb.join().unwrap();
+
+        // Picked: the user chooses the first server's other model; the second server doesn't list
+        // it, so it stays, as typed, with a note.
+        let (a, sa) = one_checkpoint_list(&["a1.safetensors", "a2-inpaint.safetensors"]);
+        let (b, sb) = one_checkpoint_list(&["b1.safetensors", "b2-inpaint.safetensors"]);
+        let (mut app, ctx, d) = generative_dialog(&a);
+        let mut t = 0.0;
+        frames_until_listed(&mut app, &ctx, d, &a, &mut t);
+        app.ui.dialog_mut(d).unwrap().fields.insert("model".into(), json!("a1.safetensors"));
+        app.ui.dialog_mut(d).unwrap().fields.insert("host".into(), json!(b));
+        frames_until_listed(&mut app, &ctx, d, &b, &mut t);
+        let fields = dialog_fields(&app, d);
+        assert_eq!(fields["model"], "a1.safetensors", "the user's pick is not replaced");
+        assert!(fields["__spec"].as_str().unwrap().contains("\"model\":text"), "{:?}", fields["__spec"]);
+        assert!(fields["__note"].as_str().unwrap().contains("a1.safetensors isn't one of them"), "{:?}", fields["__note"]);
+        sa.join().unwrap();
+        sb.join().unwrap();
+
+        // Picked and listed by the next server too: it stays, selected in the menu.
+        let (a, sa) = one_checkpoint_list(&["a1.safetensors", "a2-inpaint.safetensors"]);
+        let (c, sc) = one_checkpoint_list(&["c1.safetensors", "a1.safetensors"]);
+        let (mut app, ctx, d) = generative_dialog(&a);
+        let mut t = 0.0;
+        frames_until_listed(&mut app, &ctx, d, &a, &mut t);
+        app.ui.dialog_mut(d).unwrap().fields.insert("model".into(), json!("a1.safetensors"));
+        app.ui.dialog_mut(d).unwrap().fields.insert("host".into(), json!(c));
+        frames_until_listed(&mut app, &ctx, d, &c, &mut t);
+        let fields = dialog_fields(&app, d);
+        assert_eq!(fields["model"], "a1.safetensors");
+        assert!(fields["__spec"].as_str().unwrap().contains("\"model\":\"c1.safetensors|a1.safetensors\"=\"a1.safetensors\""), "{:?}", fields["__spec"]);
+        sa.join().unwrap();
+        sc.join().unwrap();
     }
 
     /// Preferences › Integrations offers the server's models too, asked of the server shown there
