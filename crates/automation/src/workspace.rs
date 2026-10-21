@@ -591,7 +591,7 @@ mod tests {
 
     /// #7095: replacing a file through the automation path keeps the old file's extended
     /// attributes, the same as a save through `atomic_write` does.
-    #[cfg(unix)]
+    #[cfg(any(target_os = "linux", target_os = "android", target_vendor = "apple"))]
     #[test]
     fn write_keeps_the_replaced_files_extended_attributes() {
         #[cfg(target_os = "macos")]

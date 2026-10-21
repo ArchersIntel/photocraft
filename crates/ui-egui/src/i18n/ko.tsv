@@ -2124,6 +2124,11 @@
 	Apply the pen's tilt and rotation to the tip shape	펜의 기울기와 회전을 브러시 끝 모양에 적용
 	Mixer Brush	혼합 브러시
 	Wet	젖음
+	Current Brush Load	현재 브러시 물감
+	Load Brush	브러시 채우기
+	Clean Brush	브러시 세척
+	Load the brush after each stroke	획마다 브러시 채우기
+	Clean the brush after each stroke	획마다 브러시 세척
 	Mix	혼합
 	Wetness Jitter	젖음 지터
 	Mix Jitter	혼합 지터
@@ -3313,6 +3318,7 @@ curves	Smooth	매끄럽게
 	Light Red	연한 빨강
 	Medium Blue	중간 파랑
 	Light Gray	연한 회색
+	Stop	정지
 	Object Finder	개체 찾기
 	No object found there — drag a rectangle around it	그곳에서 개체를 찾지 못했습니다 — 주위에 사각형을 드래그하세요
 	Remove after each stroke	획마다 제거
@@ -3436,3 +3442,11 @@ curves	Smooth	매끄럽게
 	In Front	앞
 	Behind	뒤
 	Blend	혼합
+
+# DDS Options (#1327)
+	DDS Options	DDS 옵션
+	Compression	압축
+	Generate Mipmaps	밉맵 생성
+
+# Graphics Adapter preference (#1885)
+	GPU adapter	GPU 어댑터

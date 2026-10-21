@@ -2231,6 +2231,11 @@ cameraRaw	Blending	混合
 	Apply the pen's tilt and rotation to the tip shape	将笔的倾斜和旋转应用于笔尖形状
 	Mixer Brush	混合器画笔
 	Wet	湿润
+	Current Brush Load	当前画笔载入
+	Load Brush	载入画笔
+	Clean Brush	清理画笔
+	Load the brush after each stroke	每次描边后载入画笔
+	Clean the brush after each stroke	每次描边后清理画笔
 	Mix	混合
 	Wetness Jitter	湿润度抖动
 	Mix Jitter	混合抖动
@@ -2753,6 +2758,7 @@ curves	Smooth	平滑
 	Light Red	浅红色
 	Medium Blue	中蓝色
 	Light Gray	浅灰色
+	Stop	停止
 	Object Finder	对象查找程序
 	No object found there — drag a rectangle around it	那里未找到对象 — 请在其周围拖动矩形
 	Remove after each stroke	每次描边后移除
@@ -2878,3 +2884,11 @@ curves	Smooth	平滑
 	In Front	前面
 	Behind	后面
 	Blend	混合
+
+# DDS Options (#1327)
+	DDS Options	DDS 选项
+	Compression	压缩
+	Generate Mipmaps	生成 Mipmap
+
+# Graphics Adapter preference (#1885)
+	GPU adapter	GPU 适配器

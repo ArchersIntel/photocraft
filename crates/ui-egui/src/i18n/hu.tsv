@@ -1412,6 +1412,11 @@
 	Warp:	Hajlítás:
 	Weight	Vastagság
 	Wet	Nedvesség
+	Current Brush Load	Az ecset jelenlegi töltete
+	Load Brush	Ecset feltöltése
+	Clean Brush	Ecset tisztítása
+	Load the brush after each stroke	Az ecset feltöltése minden ecsetvonás után
+	Clean the brush after each stroke	Az ecset tisztítása minden ecsetvonás után
 	Wet Edges	Nedves szélek
 	Wetness Jitter	Nedvesség ingadozása
 	Width	Szélesség
@@ -4173,3 +4178,10 @@ cameraRaw	Yellow	Sárga
 	Use	Használat
 	In Front	Elöl
 	Behind	Mögött
+
+# DDS Options (#1327)
+	DDS Options	DDS-beállítások
+	Generate Mipmaps	Mipmapek létrehozása
+
+# Graphics Adapter preference (#1885)
+	GPU adapter	GPU-adapter

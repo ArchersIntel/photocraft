@@ -42,6 +42,10 @@ what an agent can't finish alone.
 ### G1. PSD fidelity and Photoshop acceptance
 - **Missing:** PSDs we write are not always accepted by Photoshop, and Photoshop-authored files
   don't always render as Photoshop renders them.
+- **Partial (2026-10-15, #5972 A1):** `GdFl` noise fills render when all three RGB ranges are
+  constant and transparency is disabled. Variable-range synthesis, HSB/Lab modes and
+  transparency remain unsupported and are preserved verbatim; the five visual examples do not
+  establish Photoshop's exact noise algorithm or include this degenerate constant case.
 - **Evidence:** corpus floors (`crates/io/tests/corpus.rs`, scorecard): Photoshop-authored
   oracles 188/258 (73%; smart filter masks 2026-10-14; CMYK and Lab adjustment layers, 32-bit unclipped adjustments, Levels, Threshold, Posterize and mask feathers 2026-10-13; Gradient Map luminosity 2026-10-13; CMYK Invert, Posterize and Threshold on the inks 2026-10-12), io corpus 148/170 (87%), psd-tools 249/309 (81%); round trips ~100%
   within the corpus. Smart-filter re-render matches 5/30. User reports: a PSD with text layers
@@ -270,6 +274,7 @@ what an agent can't finish alone.
 
 | Date | Change | Summary |
 |---|---|---|
+| 2026-10-15 | minor | G1 / #5972 A1: render only provably constant-RGB `GdFl` noise fills; variable noise synthesis remains open |
 | 2026-10-18 | minor | G9: with no selection, Copy takes fill and adjustment layers whole and Paste recreates them (#2344); UI-217-23 stays partial (a single pixel layer copies its pixels only); estimate unchanged |
 | 2026-10-14 | minor | G1: a PSD smart object's filter mask shows when the file opens (Photoshop stores the filtered pixels unmasked); export stores them that way too; Photoshop-oracle floor 185 → 188 of 258 |
 | 2026-10-13 | minor | G14: D90 image area measured (4288 × 2848 at (10, 10)); gap remains open |

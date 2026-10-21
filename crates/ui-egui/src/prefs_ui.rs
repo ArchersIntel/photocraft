@@ -1135,6 +1135,7 @@ pub fn body(app: &mut PhotocraftApp, ui: &mut egui::Ui, f: &mut Map<String, Valu
             let mut info = app.perf.gpu_info.lines();
             info.extend(gpu_memory_lines(app));
             f.insert("__gpuInfo".into(), json!(info));
+            f.insert("__gpuAdapters".into(), json!(app.perf.gpu_info.adapters));
             refresh_generative_models(ui.ctx(), f);
             let system = system_theme(app, ui.ctx());
             prefs_body(ui, f, system);
@@ -1367,7 +1368,7 @@ fn prefs_body(ui: &mut egui::Ui, f: &mut Map<String, Value>, system: Option<egui
                         );
                     }
                     if section == "performance" {
-                        gpu_status_rows(ui, f.get("__gpuInfo"), obj);
+                        gpu_status_rows(ui, f.get("__gpuInfo"), f.get("__gpuAdapters"), obj);
                     }
                     ui.add_space(8.0);
                 }
@@ -1392,7 +1393,7 @@ fn prefs_body(ui: &mut egui::Ui, f: &mut Map<String, Value>, system: Option<egui
 
 /// Preferences › Performance: what the app renders with now, and a reset of the GPU backend
 /// (a crashed start may have moved it to a safer choice).
-fn gpu_status_rows(ui: &mut egui::Ui, info: Option<&Value>, obj: &mut Map<String, Value>) {
+fn gpu_status_rows(ui: &mut egui::Ui, info: Option<&Value>, adapters: Option<&Value>, obj: &mut Map<String, Value>) {
     let t = Tokens::get(ui.ctx());
     ui.add_space(10.0);
     ui.label(RichText::new(tl!("Graphics")).font(crate::theme::semibold(12.5)).color(t.text));
@@ -1411,7 +1412,35 @@ fn gpu_status_rows(ui: &mut egui::Ui, info: Option<&Value>, obj: &mut Map<String
             crate::widgets::dropdown(ui, "graphics-backend", &mut current, &pairs, 220.0);
             obj.insert("gpuBackend".into(), json!(current));
         });
+        if !prefs::is_hidden("performance.gpuAdapter") {
+            graphics_adapter_row(ui, adapters, obj);
+        }
     });
+}
+
+/// Preferences › Performance › Graphics Adapter: which GPU draws on a machine with several. The
+/// value is the adapter's name; empty is automatic. A saved adapter that isn't present now (an
+/// unplugged eGPU) stays listed, marked ⚠, so opening the dialog doesn't silently change the choice.
+fn graphics_adapter_row(ui: &mut egui::Ui, adapters: Option<&Value>, obj: &mut Map<String, Value>) {
+    let mut current = obj.get("gpuAdapter").and_then(Value::as_str).unwrap_or("").to_string();
+    let mut names: Vec<String> = adapters.and_then(Value::as_array).into_iter().flatten().filter_map(Value::as_str).map(str::to_string).collect();
+    // A saved name fragment ("nvidia") isn't an adapter's full name but still selects one; only a
+    // value no listed adapter matches is marked.
+    let kept = !current.is_empty() && !names.contains(&current);
+    let missing = kept && !names.iter().any(|n| prefs::gpu_adapter_matches(n, &current));
+    if kept {
+        names.push(current.clone());
+    }
+    let automatic = tl!("Automatic");
+    let labels: Vec<String> = names.iter().map(|n| if missing && *n == current { format!("⚠ {n}") } else { n.clone() }).collect();
+    let mut pairs: Vec<(String, &str)> = vec![(String::new(), automatic)];
+    pairs.extend(names.iter().cloned().zip(labels.iter().map(String::as_str)));
+    ui.horizontal(|ui| {
+        ui.label(tl!("GPU adapter"));
+        crate::widgets::dropdown_literal(ui, "graphics-adapter", &mut current, &pairs, 320.0);
+    });
+    ui.label(RichText::new(tl!("Applies at next launch.")).color(Tokens::get(ui.ctx()).text_faint));
+    obj.insert("gpuAdapter".into(), json!(current));
 }
 
 /// One user-facing choice; legacy flags remain compatible with older settings.
@@ -1874,7 +1903,7 @@ fn field_visible(section: &str, obj: &Map<String, Value>, k: &str, query: &str) 
     let drawn_elsewhere = (section == "interface" && matches!(k, "theme" | "appearanceMode" | "darkTheme" | "lightTheme" | "favoriteThemes"))
         // View › Rulers (⌘R) sets it, as in Photoshop.
         || path == "unitsAndRulers.showRulers"
-        || (section == "performance" && matches!(k, "useGpu" | "gpuBackend" | "renderingMode" | "memoryUsageMb"))
+        || (section == "performance" && matches!(k, "useGpu" | "gpuBackend" | "gpuAdapter" | "renderingMode" | "memoryUsageMb"))
         // The browser presents frames itself: Low-Latency Drawing does nothing there.
         || (cfg!(target_arch = "wasm32") && path == "performance.lowLatencyDrawing")
         || (section == "export" && !export_field_visible(obj, k))

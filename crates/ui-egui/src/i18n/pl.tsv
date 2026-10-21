@@ -2147,6 +2147,11 @@
 	Mixer Brush Tool	Narzędzie Pędzel mieszający
 	Color Replacement Tool	Narzędzie Zamiana koloru
 	Wet	Wilgotność
+	Current Brush Load	Bieżący ładunek pędzla
+	Load Brush	Napełnij pędzel
+	Clean Brush	Wyczyść pędzel
+	Load the brush after each stroke	Napełniaj pędzel po każdym pociągnięciu
+	Clean the brush after each stroke	Czyść pędzel po każdym pociągnięciu
 	Mix	Mieszanie
 	Wetness Jitter	Rozrzut wilgotności
 	Mix Jitter	Rozrzut mieszania
@@ -3853,3 +3858,11 @@ curves	Smooth	Wygładź
 	Use	Użyj
 	In Front	Z przodu
 	Behind	Z tyłu
+
+# DDS Options (#1327)
+	DDS Options	Opcje DDS
+	Compression	Kompresja
+	Generate Mipmaps	Generuj mipmapy
+
+# Graphics Adapter preference (#1885)
+	GPU adapter	Karta GPU

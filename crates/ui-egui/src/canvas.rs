@@ -1608,10 +1608,16 @@ fn ensure_gpu(app: &mut PhotocraftApp, ctx: &egui::Context, idx: usize, visible:
     };
     let (doc, raw_key) = display_doc(app, idx);
     let (display, _) = canvas_display(app, &doc, None);
+    // Repeated pattern tiles sample the same texture, including pixels outside the unwrapped
+    // viewport. Refresh the affected document region while Pattern Preview is enabled.
+    let blend_visible = if app.ui.view.pattern_preview { doc.bounds() } else { visible };
     // The texture is shared by every display: only what it stores counts, not the monitor.
     let display_key = texture_key(display.as_deref());
     let seen = app.canvases.get(&(id, GPU_OUTPUT)).map(|c| (c.revision, c.preview_key));
     let mut damage = seen.and_then(|seen| damage_since(app, idx, seen, (revision, raw_key), display_key, last_damage));
+    if let Some(region) = damage {
+        damage = Some(crate::blend_preview::clip_damage(app, id, revision, raw_key, region, blend_visible));
+    }
     // To an adjustment dialog's preview: only what the view shows now (the rest as it moves there).
     if damage.is_some()
         && let Some(r) = seen.filter(|s| s.0 == revision).and_then(|s| crate::adjust_preview::switch_region(app, id, revision, s.1 ^ display_key, raw_key))
@@ -1671,7 +1677,12 @@ fn ensure_gpu(app: &mut PhotocraftApp, ctx: &egui::Context, idx: usize, visible:
             let r = gpu.refresh(id.0, &doc, Some(r), display.as_deref());
             app.perf.record_refresh(&r);
         }
-        return true;
+        // Blend previews keep offscreen pixels untouched until the view reaches them.
+        // Use the normal refresh path so CPU fallback and pending redraws stay synchronized.
+        damage = crate::blend_preview::uncovered(app, id, revision, raw_key, blend_visible);
+        if damage.is_none() {
+            return true;
+        }
     }
     // Display textures for a canvas this large would not fit the GPU: the reduced CPU canvas
     // draws it (checked before the memory budget, which walks the history, every frame).
@@ -3002,7 +3013,7 @@ const DISPLAY_LUT: usize = 33;
 /// Keep the GPU display LUT under `key` (the document's texture or a preview of it) in step with
 /// `doc`'s colour management: document → monitor profile and View › Proof Colors / Gamut
 /// Warning (the 32-bit preview is applied by the canvas shader, see [`hdr_preview`]). Returns the canvas `display` mode (0 none — the identity, e.g. sRGB on
-/// an sRGB monitor —, 1 LUT, 2 LUT + gamut warning).
+/// an sRGB monitor —, 1 LUT, 2 LUT + gamut warning, 3 matrix/shaper).
 fn sync_display_lut(app: &mut PhotocraftApp, doc: &photocraft_doc::Document, key: u64, display: Option<u32>) -> u8 {
     let Some(gpu) = app.gpu.clone() else { return 0 };
     let output = display.unwrap_or(0);
@@ -3012,6 +3023,13 @@ fn sync_display_lut(app: &mut PhotocraftApp, doc: &photocraft_doc::Document, key
         && s == sig
     {
         return mode;
+    }
+    // Keep the curve/matrix/curve stages separate: interpolating a finished display
+    // transform on a 33³ lattice crushes shadows when the monitor curve is steep near zero.
+    if let Ok(Some(shaper)) = app.session.color.gpu_canvas_matrix_shaper_for(doc, display) {
+        gpu.set_display_matrix_shaper(key, output, &shaper);
+        gpu.cache_display_lut_signature(key, output, sig, 3);
+        return 3;
     }
     let gamut = app.session.color.proof(doc.id).gamut_warning;
     let mode = match app.session.color.gpu_canvas_lut_for(doc, DISPLAY_LUT, display) {
@@ -3724,7 +3742,10 @@ pub fn canvas_view(app: &mut PhotocraftApp, ui: &mut egui::Ui, idx: usize, rect:
         // Live painting tools start on the press, not once the pointer passes egui's click
         // distance: the first dab shows at once. The drag recognised later continues that stroke,
         // and a click (or a long press that never moved) just ends it.
+        let physical_right = app.services.right_button_down.as_ref().is_some_and(|f| f());
+        let right_down = ui.input(|i| i.pointer.secondary_down()) || physical_right;
         if strokes_live(tool)
+            && !right_down
             && app.drag.is_none()
             && response.is_pointer_button_down_on()
             && ui.input(|i| i.pointer.primary_pressed())
@@ -3774,7 +3795,9 @@ pub fn canvas_view(app: &mut PhotocraftApp, ui: &mut egui::Ui, idx: usize, rect:
             };
             let press_this_frame = events.iter().any(|e| matches!(e, egui::Event::PointerButton { button: b, pressed: true, .. } if *b == button));
             let down_at_start = !press_this_frame && (gesture_active_before || buttons.started);
-            let mut positions = if freehand_tool(tool) {
+            let mut positions = if app.brush_resize.is_some() {
+                response.interact_pointer_pos().into_iter().collect()
+            } else if freehand_tool(tool) {
                 pointer_moves(&events, button, down_at_start)
             } else if buttons.dragged {
                 response.interact_pointer_pos().into_iter().collect()
@@ -4088,7 +4111,11 @@ pub fn canvas_view(app: &mut PhotocraftApp, ui: &mut egui::Ui, idx: usize, rect:
                 t if resizing && crate::brush_resize::applies(t) => egui::CursorIcon::None,
                 // ⌥ turns a painting tool into the Eyedropper (`alt_eyedropper`): its cursor too,
                 // unless Preferences › Cursors › Other Cursors asks for the precise crosshair.
-                t if app.alt_sampling || (app.drag.is_none() && alt_samples(t, crate::workspace_ui::sticky_mods(app, ui.input(|i| i.modifiers)))) => {
+                t if app.alt_sampling
+                    || (app.drag.is_none()
+                        && !app.services.right_button_down.as_ref().is_some_and(|f| f())
+                        && alt_samples(t, crate::workspace_ui::sticky_mods(app, ui.input(|i| i.modifiers)))) =>
+                {
                     // While it samples (button held), the comparison ring replaces the cursor (#213).
                     if let Some(icon) = eyedropper_ring(app, &painter, &xf, p, response.is_pointer_button_down_on()) {
                         icon
@@ -5172,7 +5199,8 @@ pub(crate) fn paint_bucket_cursor(ctx: &egui::Context, p: Pos2) -> egui::CursorI
 /// painting and sampling.
 fn alt_eyedropper(app: &mut PhotocraftApp, ev: ToolEvent, mods: egui::Modifiers) -> bool {
     if matches!(ev, ToolEvent::Down { .. }) {
-        app.alt_sampling = alt_samples(app.active_tool(), mods);
+        let physical_right = app.services.right_button_down.as_ref().is_some_and(|f| f());
+        app.alt_sampling = !physical_right && alt_samples(app.active_tool(), mods);
     }
     if !app.alt_sampling {
         return false;
@@ -6852,7 +6880,7 @@ mod tests {
         let key = doc.id.0;
         // sRGB on the sRGB display needs no LUT; on the P3 display it does.
         assert_eq!(sync_display_lut(&mut app, &doc, key, Some(1)), 0);
-        assert_eq!(sync_display_lut(&mut app, &doc, key, Some(4)), 1);
+        assert_eq!(sync_display_lut(&mut app, &doc, key, Some(4)), 3);
         let gpu = app.gpu.clone().unwrap();
         let (s1, s4) = (gpu.display_lut_signature(key, 1).unwrap(), gpu.display_lut_signature(key, 4).unwrap());
         assert_ne!(s1.0, s4.0);
@@ -6860,7 +6888,7 @@ mod tests {
         // Drawing one window leaves the other's LUT alone.
         for _ in 0..3 {
             assert_eq!(sync_display_lut(&mut app, &doc, key, Some(1)), 0);
-            assert_eq!(sync_display_lut(&mut app, &doc, key, Some(4)), 1);
+            assert_eq!(sync_display_lut(&mut app, &doc, key, Some(4)), 3);
         }
         assert_eq!((gpu.display_lut_signature(key, 1), gpu.display_lut_signature(key, 4)), (Some(s1), Some(s4)));
         assert!(gpu.has_display_lut(key, 4));
@@ -8959,3 +8987,7 @@ mod rotation_preview_isolation_tests {
 #[cfg(test)]
 #[path = "canvas_display_memo_tests.rs"]
 mod display_memo_tests;
+
+#[cfg(test)]
+#[path = "canvas/blend_viewport_tests.rs"]
+mod blend_viewport_regression;

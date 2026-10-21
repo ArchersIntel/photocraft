@@ -1028,6 +1028,11 @@
 	Mix	Смешивание
 	Auto Clean Brush	Автоочистка кисти
 	Wet	Влага
+	Current Brush Load	Текущая загрузка кисти
+	Load Brush	Загрузить кисть
+	Clean Brush	Очистить кисть
+	Load the brush after each stroke	Загружать кисть после каждого штриха
+	Clean the brush after each stroke	Очищать кисть после каждого штриха
 	Rate	Скорость
 	Airbrush: keeps depositing paint while the pointer rests.	Аэрограф: продолжает наносить краску, пока курсор неподвижен.
 	Pulled String Mode	Режим натянутой нити
@@ -3228,3 +3233,11 @@ curves	Smooth	Сгладить
 	Use	Использовать
 	In Front	Спереди
 	Behind	Сзади
+
+# DDS Options (#1327)
+	DDS Options	Параметры DDS
+	Compression	Сжатие
+	Generate Mipmaps	Создать MIP-карты
+
+# Graphics Adapter preference (#1885)
+	GPU adapter	Адаптер GPU

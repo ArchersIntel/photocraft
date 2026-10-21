@@ -1005,6 +1005,11 @@
 	Mix	Змішування
 	Auto Clean Brush	Автоматично очищувати пензель
 	Wet	Вологість
+	Current Brush Load	Поточне завантаження пензля
+	Load Brush	Завантажити пензель
+	Clean Brush	Очистити пензель
+	Load the brush after each stroke	Завантажувати пензель після кожного штриха
+	Clean the brush after each stroke	Очищати пензель після кожного штриха
 	Rate	Частота
 	Airbrush: keeps depositing paint while the pointer rests.	Аерограф: продовжує наносити фарбу, коли вказівник нерухомий.
 	Pulled String Mode	Режим натягнутої нитки
@@ -3962,3 +3967,11 @@ curves	Smooth	Згладити
 	Use	Використати
 	In Front	Спереду
 	Behind	Ззаду
+
+# DDS Options (#1327)
+	DDS Options	Параметри DDS
+	Compression	Стиснення
+	Generate Mipmaps	Створити MIP-карти
+
+# Graphics Adapter preference (#1885)
+	GPU adapter	Адаптер GPU
