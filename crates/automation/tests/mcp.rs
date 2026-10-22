@@ -318,6 +318,10 @@ async fn errors_are_tool_errors_not_crashes() {
     assert!(text(&r).contains("bridge"));
     let r = call(&client, "doc_export", json!({})).await;
     assert_eq!(r.is_error, Some(true));
+    // Quality 0 is refused, not clamped to 1 (serde already refuses 500, -1 and "85").
+    let r = call(&client, "doc_save", json!({"path": "q.jpg", "quality": 0})).await;
+    assert_eq!(r.is_error, Some(true));
+    assert!(text(&r).contains("from 1 to 100"), "{}", text(&r));
     // Server still alive.
     json_of(&call(&client, "session_list", json!({})).await);
     client.cancel().await.unwrap();
@@ -770,11 +774,12 @@ async fn embedded_smart_objects_can_be_edited_saved_and_unpacked_without_file_au
     let client = connect(PhotocraftMcp::headless()).await;
     let run = async |id: &str, params: Value| json_of(&call(&client, "command_run", json!({"id": id, "params": params})).await);
     json_of(&call(&client, "doc_new", json!({"width": 16, "height": 12, "background": "white"})).await);
-    run("layer.smartObjects.convertToSmartObject", json!({})).await;
     let outer = run("layer.smartObjects.convertToSmartObject", json!({})).await["layer"].clone();
     // An explicit target works even with a regular pixel layer selected.
     run("layer.new.layer", json!({"name": "Other layer"})).await;
     assert_eq!(run("layer.smartObjects.editContents", json!({"layer": outer})).await["document"], 1);
+    // A smart object cannot be converted again, so nest one inside the contents instead.
+    run("layer.smartObjects.convertToSmartObject", json!({})).await;
     assert_eq!(run("layer.smartObjects.editContents", json!({})).await["document"], 2);
     run("layer.setProps", json!({"name": "Edited photo", "opacity": 0.5})).await;
     assert_eq!(run("layer.smartObjects.saveContents", json!({})).await["updated"], true);
