@@ -1053,7 +1053,7 @@ fn generative_fill_dialog(app: &mut PhotocraftApp, ctx: &egui::Context, id: &str
     }
     let key = format!("{backend}|{host}");
     let slot = start_lookup(backend, host);
-    ctx.data_mut(|data| data.get_temp_mut_or_default::<Vec<(u64, String, LookupSlot)>>(egui::Id::new(GF_DIALOG_LOOKUPS_ID)).push((d, key, slot)));
+    ctx.data_mut(|data| data.get_temp_mut_or_default::<Vec<(u64, String, LookupSlot)>>(egui::Id::unique(GF_DIALOG_LOOKUPS_ID)).push((d, key, slot)));
     ctx.request_repaint_after(std::time::Duration::from_millis(100));
     Some(d)
 }
@@ -1878,8 +1878,8 @@ fn refresh_generative_models(ctx: &egui::Context, f: &mut Map<String, Value>) {
     // A blank host stands for the usual one on this machine.
     let host = if typed.is_empty() { photocraft_engine::generative_fill_cmds::default_host_for(&backend).unwrap_or_default() } else { typed };
     let want = format!("{backend}|{host}");
-    let id = egui::Id::new(GF_PREF_LOOKUP_ID);
-    let asked = ctx.data_mut(|d| d.remove_temp::<bool>(egui::Id::new(GF_REFRESH_ID))).unwrap_or(false);
+    let id = egui::Id::unique(GF_PREF_LOOKUP_ID);
+    let asked = ctx.data_mut(|d| d.remove_temp::<bool>(egui::Id::unique(GF_REFRESH_ID))).unwrap_or(false);
     let now = ctx.input(|i| i.time);
 
     // 1. A lookup that has finished: keep its answer only if it was for the server shown now.
@@ -1923,7 +1923,7 @@ fn refresh_generative_models(ctx: &egui::Context, f: &mut Map<String, Value>) {
 
     let models: Vec<String> = f.get("__gfModels").and_then(Value::as_array).into_iter().flatten().filter_map(Value::as_str).map(str::to_string).collect();
     let note = f.get("__gfNote").and_then(Value::as_str).unwrap_or_default().to_string();
-    ctx.data_mut(|d| d.insert_temp(egui::Id::new(GF_MODELS_ID), (models, note)));
+    ctx.data_mut(|d| d.insert_temp(egui::Id::unique(GF_MODELS_ID), (models, note)));
 }
 
 /// The server a Generative Fill dialog's `backend` and `host` fields name now, as the same
@@ -1942,7 +1942,7 @@ fn dialog_server(fields: &Map<String, Value>) -> (String, String) {
 /// asked after a short pause for typing and the model goes back to a text box meanwhile. A dialog
 /// closed in the meantime is left alone.
 fn poll_model_lookups(app: &mut PhotocraftApp, ctx: &egui::Context) {
-    let id = egui::Id::new(GF_DIALOG_LOOKUPS_ID);
+    let id = egui::Id::unique(GF_DIALOG_LOOKUPS_ID);
     let pending: Vec<(u64, String, LookupSlot)> = ctx.data(|d| d.get_temp(id)).unwrap_or_default();
     let open: Vec<u64> =
         app.ui.dialogs.iter().filter(|d| d.fields.get("__command").and_then(Value::as_str) == Some("edit.generativeFill")).map(|d| d.id).collect();
@@ -2149,7 +2149,7 @@ fn field_rows(ui: &mut egui::Ui, section: &str, obj: &mut Map<String, Value>, ke
             // else an inpainting model). Without a list (no server answered) a text box.
             Value::String(s) if path == "integrations.generativeFillModel" => {
                 ui.label(RichText::new(tl!(&label)).color(t.text_dim));
-                let (models, note): (Vec<String>, String) = ui.ctx().data(|d| d.get_temp(egui::Id::new(GF_MODELS_ID))).unwrap_or_default();
+                let (models, note): (Vec<String>, String) = ui.ctx().data(|d| d.get_temp(egui::Id::unique(GF_MODELS_ID))).unwrap_or_default();
                 let mut cur = s.clone();
                 ui.vertical(|ui| {
                     ui.horizontal(|ui| {
@@ -2164,10 +2164,10 @@ fn field_rows(ui: &mut egui::Ui, section: &str, obj: &mut Map<String, Value>, ke
                             if !saved.is_empty() && !models.contains(&saved) {
                                 pairs.push((saved.clone(), saved.as_str()));
                             }
-                            crate::widgets::dropdown_literal(ui, &format!("pref-{path}"), &mut cur, &pairs, 260.0);
+                            crate::widgets::dropdown_literal(ui, &format!("pref-{path}"), &label, &mut cur, &pairs, 260.0);
                         }
                         if ui.small_button(tl!("Refresh")).clicked() {
-                            ui.ctx().data_mut(|d| d.insert_temp(egui::Id::new(GF_REFRESH_ID), true));
+                            ui.ctx().data_mut(|d| d.insert_temp(egui::Id::unique(GF_REFRESH_ID), true));
                         }
                     });
                     if !note.is_empty() {
@@ -5035,7 +5035,7 @@ mod tests {
         let d = crate::menus::invoke(&mut app, &ctx, "edit.generativeFill", json!({})).unwrap()["dialog"].as_u64().unwrap();
         app.ui.close_dialog(d);
         let pending =
-            |ctx: &egui::Context| ctx.data(|c| c.get_temp::<Vec<(u64, String, LookupSlot)>>(egui::Id::new(GF_DIALOG_LOOKUPS_ID))).unwrap_or_default().len();
+            |ctx: &egui::Context| ctx.data(|c| c.get_temp::<Vec<(u64, String, LookupSlot)>>(egui::Id::unique(GF_DIALOG_LOOKUPS_ID))).unwrap_or_default().len();
         assert_eq!(pending(&ctx), 1);
         let started = std::time::Instant::now();
         while pending(&ctx) > 0 {
@@ -5229,7 +5229,7 @@ mod tests {
         let ctx = egui::Context::default();
         let d = open_preferences(&mut app, "integrations");
         let mut f = app.ui.dialogs.iter().find(|x| x.id == d).unwrap().fields.clone();
-        let models = |ctx: &egui::Context| ctx.data(|d| d.get_temp::<(Vec<String>, String)>(egui::Id::new(GF_MODELS_ID))).unwrap();
+        let models = |ctx: &egui::Context| ctx.data(|d| d.get_temp::<(Vec<String>, String)>(egui::Id::unique(GF_MODELS_ID))).unwrap();
         // A pass at time `t` (the typing pause is measured in egui time).
         let frame = |ctx: &egui::Context, f: &mut Map<String, Value>, t: f64| {
             ctx.begin_pass(egui::RawInput { time: Some(t), ..Default::default() });
@@ -5291,7 +5291,7 @@ mod tests {
         assert!(models(&ctx).1.starts_with("Looking for models on"), "{}", models(&ctx).1);
         settle(&ctx, &mut f, &mut t);
         // Refresh asks again at once.
-        ctx.data_mut(|d| d.insert_temp(egui::Id::new(GF_REFRESH_ID), true));
+        ctx.data_mut(|d| d.insert_temp(egui::Id::unique(GF_REFRESH_ID), true));
         t += 0.01;
         frame(&ctx, &mut f, t);
         assert!(models(&ctx).1.starts_with("Looking for models on"), "{}", models(&ctx).1);
