@@ -60,7 +60,7 @@ pub(crate) fn show(app: &mut PhotocraftApp, ctx: &egui::Context) {
     let mut retry = false;
     let mut download = None;
     egui::Window::new(tl!("PhotoCraft Updates"))
-        .id(egui::Id::new("photocraft_updates"))
+        .id(egui::Id::unique("photocraft_updates"))
         .open(&mut open)
         .collapsible(false)
         .resizable(false)
