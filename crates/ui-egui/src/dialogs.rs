@@ -181,16 +181,47 @@ fn resizable_dialog(fields: &serde_json::Map<String, Value>) -> Option<egui::Vec
         Some(crate::prefs_ui::PREFERENCES_SIZE)
     } else if fields.contains_key("__web") {
         Some(egui::vec2(960.0, 900.0))
+    } else if is_curves(fields) {
+        Some(CURVES_SIZE)
     } else {
         None
     }
+}
+
+/// Whether `fields` are the Image › Adjustments › Curves dialog's.
+fn is_curves(fields: &serde_json::Map<String, Value>) -> bool {
+    fields.get("__adjust").and_then(Value::as_str) == Some("curves")
+}
+
+/// The size the Curves dialog first opens at: the 300-point graph it had before it could be
+/// resized (#5113); it grows to fit its controls below the graph.
+const CURVES_SIZE: egui::Vec2 = egui::vec2(300.0, 420.0);
+/// The smallest a resizable dialog is dragged to: Curves keeps a usable graph (#8984), the others
+/// their two-column layouts.
+fn resizable_min(fields: &serde_json::Map<String, Value>) -> egui::Vec2 {
+    if is_curves(fields) { egui::vec2(300.0, 420.0) } else { egui::vec2(560.0, 400.0) }
+}
+
+/// Where the size the user last gave a resizable dialog is kept (#8984), beside its place.
+fn size_id(place: egui::Id) -> egui::Id {
+    place.with("size")
+}
+
+/// The largest a resizable dialog of `fields` with smallest size `min` is dragged to: the window
+/// less a margin, and for Curves no wider than its graph can grow (#8984), so no blank column.
+fn resizable_max(ctx: &egui::Context, fields: &serde_json::Map<String, Value>, min: egui::Vec2) -> egui::Vec2 {
+    let mut max = (ctx.content_rect().size() - egui::vec2(40.0, 40.0)).max(min);
+    if is_curves(fields) {
+        max.x = max.x.min(crate::adjust_editors::curve_side_max(ctx)).max(min.x);
+    }
+    max
 }
 
 fn show_modal<T>(
     modal: egui::Modal,
     ctx: &egui::Context,
     id: egui::Id,
-    resizable: Option<egui::Vec2>,
+    resizable: Option<(egui::Vec2, egui::Vec2, egui::Vec2)>,
     interactive: bool,
     contents: impl FnOnce(&mut egui::Ui) -> T,
 ) -> egui::ModalResponse<T> {
@@ -199,17 +230,10 @@ fn show_modal<T>(
         if !interactive {
             ui.disable();
         }
-        if let Some(size) = resizable {
-            let max = (ctx.content_rect().size() - egui::vec2(40.0, 40.0)).max(egui::vec2(560.0, 400.0));
+        if let Some((size, min, max)) = resizable {
             // No stroke: Resize outlines its contents 2 points out, an inner box inside the
             // dialog's frame that left the title and buttons flush against it (#8199).
-            egui::Resize::default()
-                .id(id.with("resize"))
-                .with_stroke(false)
-                .default_size(size.min(max))
-                .min_size(egui::vec2(560.0, 400.0))
-                .max_size(max)
-                .show(ui, contents)
+            egui::Resize::default().id(id.with("resize")).with_stroke(false).default_size(size.min(max)).min_size(min).max_size(max).show(ui, contents)
         } else {
             contents(ui)
         }
@@ -289,14 +313,22 @@ pub fn show(app: &mut PhotocraftApp, ctx: &egui::Context) {
         let web = fields.contains_key("__web");
         let web_popup_open = web && egui::Popup::is_any_open(ctx);
         let resizable = resizable_dialog(&fields);
-        let modal = show_modal(modal, ctx, id, resizable, interactive, |ui| {
+        // Curves reopens at the size it was left at (#8984).
+        let remembered = if is_curves(&fields) { ctx.data_mut(|m| m.get_persisted::<egui::Vec2>(size_id(place))) } else { None };
+        let resize = resizable.map(|size| {
+            let min = resizable_min(&fields);
+            (remembered.unwrap_or(size), min, resizable_max(ctx, &fields, min))
+        });
+        let mut given = None;
+        let modal = show_modal(modal, ctx, id, resize, interactive, |ui| {
             sizing = ui.is_sizing_pass();
             let available = ui.available_size();
+            given = Some(available);
             // A dialog of a few short fields (`__compact`, Fit Image) is narrower (#4673): the title
             // rule and the button row fill the width they are given, so it needs its own maximum too.
             let compact = d.fields.contains_key("__compact");
-            // The curve editor caps its graph allocation at 300 points (#5113).
-            let curves = fields.get("__adjust").and_then(Value::as_str) == Some("curves");
+            // The curve editor's graph is as wide as the dialog lets it be (#5113, #8984).
+            let curves = is_curves(&fields);
             if !compact {
                 ui.set_min_width(if curves { 300.0 } else { 380.0 });
             }
@@ -323,7 +355,7 @@ pub fn show(app: &mut PhotocraftApp, ctx: &egui::Context) {
             } else if compact {
                 260.0
             } else if curves {
-                300.0
+                available.x.max(300.0)
             } else {
                 440.0
             }));
@@ -394,6 +426,7 @@ pub fn show(app: &mut PhotocraftApp, ctx: &egui::Context) {
                     ui.add_space(8.0);
                     about_tab_body(app, ui, chosen);
                 }
+                DialogKind::Command if crate::open_prompt::owns_damage(&fields) => crate::open_prompt::damage_body(ui, &fields),
                 DialogKind::Command if crate::guide_layout_ui::owns(&fields) => outcome = crate::guide_layout_ui::body(app, ui, &mut fields, interactive),
                 DialogKind::Command if crate::brush_preset_dialog::owns(&fields) => {
                     outcome = crate::brush_preset_dialog::body(app, ui, &mut fields, interactive)
@@ -502,6 +535,8 @@ pub fn show(app: &mut PhotocraftApp, ctx: &egui::Context) {
                     } else {
                         let ok_label = if d.kind == DialogKind::NewDocument {
                             tl!("Create")
+                        } else if crate::open_prompt::owns_damage(&d.fields) {
+                            tl!("Continue")
                         } else if crate::delete_layer_prompt::owns(&d.fields) {
                             tl!("Delete")
                         } else if crate::disk_change_prompt::owns(&d.fields) || crate::replace_prompt::owns(&d.fields) {
@@ -579,6 +614,17 @@ pub fn show(app: &mut PhotocraftApp, ctx: &egui::Context) {
         });
         // The picker has a larger frame margin; include that whole frame in the canvas hit guard.
         shown.push(if color_picker { modal.response.rect } else { modal.inner });
+        // The size Curves was given (dragged or grown to fit) is the one it reopens at (#8984).
+        // A size at the window's limit is the window's, not the user's: a large remembered size
+        // squeezed into a small window is kept for a larger one.
+        if let (false, true, Some(size), Some((opened, _, max))) = (sizing, is_curves(&fields), given.filter(|g| g.is_finite()), resize)
+            && size != opened.min(max)
+            && size.x < max.x - 0.5
+            && size.y < max.y - 0.5
+            && remembered != Some(size)
+        {
+            ctx.data_mut(|m| m.insert_persisted(size_id(place), size));
+        }
         // Pin once laid out at its real size (the first frame is an invisible sizing pass).
         if !sizing && (web || pinned.is_none() || drag != egui::Vec2::ZERO) {
             let screen = ctx.content_rect();
@@ -688,10 +734,81 @@ pub fn title(d: &Dialog) -> String {
     }
 }
 
+type Fields = serde_json::Map<String, Value>;
+
+/// The markers [`confirm`] and [`cancel`] choose a dialog's handler by: keys the code opening a
+/// dialog puts in its fields. Keep in step with the arms of `confirm`.
+const ROUTES: &[fn(&Fields) -> bool] = &[
+    crate::guide_layout_ui::owns,
+    crate::brush_preset_dialog::owns,
+    crate::fill_ui::owns,
+    crate::pattern_fill_ui::owns,
+    crate::stroke_ui::owns,
+    crate::channel_options_ui::owns,
+    crate::channel_options_ui::owns_new_spot,
+    crate::shape_dialog::owns,
+    crate::delete_layer_prompt::owns,
+    crate::disk_change_prompt::owns,
+    crate::actions::owns_insert_stop,
+    crate::new_layer_ui::owns,
+    crate::mask_trash_prompt::owns,
+    crate::rasterize_prompt::owns,
+    crate::duplicate_layer_ui::owns,
+    crate::stack_dialog::owns,
+    crate::tool_reset::owns,
+    crate::crop_presets::owns,
+    crate::variables_ui::owns,
+    crate::file_ui::owns,
+    crate::new_guide_ui::owns,
+    crate::color_picker_ui::owns,
+    crate::color_range_ui::owns,
+    crate::prefs_ui::owns,
+    crate::open_prompt::owns,
+    crate::replace_prompt::owns,
+    crate::layer_style::color_picker::owns,
+    |f| f.contains_key("__export"),
+    |f| f.contains_key("__smartFilter"),
+    |f| f.contains_key(crate::actions::RESUME),
+];
+
+/// Whether `key` is a marker that picks a dialog's handler. Automation may change the values of
+/// a dialog's fields, private ones included, but never add a marker: a dialog it opened would
+/// otherwise confirm through another dialog's handler, one its command was never judged for.
+pub fn is_route_marker(key: &str) -> bool {
+    let probe = Fields::from_iter([(key.to_string(), Value::Bool(true))]);
+    ROUTES.iter().any(|owns| owns(&probe))
+}
+
+/// The file command a dialog's handler stands for when it reads or writes files itself, outside
+/// the engine (a disk-change save, Export As, Save for Web, Print), so automation is judged for
+/// that command rather than for the dialog's `__command`.
+fn file_command(fields: &Fields) -> Option<&'static str> {
+    if crate::disk_change_prompt::owns(fields) {
+        Some("file.save")
+    } else if fields.contains_key("__export") {
+        Some("file.export.exportAs")
+    } else if fields.contains_key("__web") {
+        Some("file.export.saveForWebLegacy")
+    } else if fields.contains_key("__print") {
+        Some("file.print")
+    } else {
+        None
+    }
+}
+
 /// Confirm a dialog: run its action and close it. Used by the OK button and by automation.
 pub fn confirm(app: &mut PhotocraftApp, id: u64) -> Result<Value, String> {
     if crate::layer_style::color_picker::has_child(app, id) {
         return Err("confirm or cancel the Layer Style color picker first".into());
+    }
+    // A control request installs the session gate; synthetic input sets `automation_input`.
+    // Either way the handler's own file access is judged before it runs, as its command would be.
+    if (app.automation_input || app.session.authorize.is_some())
+        && let Some(d) = app.ui.dialogs.iter().find(|d| d.id == id)
+        && let Some(command) = file_command(&d.fields)
+        && let Some(authorize) = app.services.automation_command.as_ref()
+    {
+        authorize(command, &Value::Object(d.fields.clone()))?;
     }
     if let Some(d) = app.ui.dialogs.iter().find(|d| d.id == id).filter(|d| crate::guide_layout_ui::owns(&d.fields)) {
         if app.ui.dialogs.iter().any(|child| crate::color_picker_ui::owns(&child.fields) && child.fields.get("__dialog").and_then(Value::as_u64) == Some(id)) {
@@ -713,6 +830,7 @@ pub fn confirm(app: &mut PhotocraftApp, id: u64) -> Result<Value, String> {
             }
             r
         }
+        DialogKind::Command if crate::open_prompt::owns_damage(&d.fields) => crate::open_prompt::answer_damage(app, true),
         DialogKind::Command if crate::guide_layout_ui::owns(&d.fields) => crate::guide_layout_ui::confirm(app, &d.fields),
         DialogKind::Command if crate::brush_preset_dialog::owns(&d.fields) => crate::brush_preset_dialog::confirm(app, &d.fields),
         DialogKind::Command if crate::fill_ui::owns(&d.fields) => crate::fill_ui::confirm(app, &d.fields),
@@ -747,7 +865,20 @@ pub fn confirm(app: &mut PhotocraftApp, id: u64) -> Result<Value, String> {
             };
             if crate::filter_dialog::needs_displace_map(&cmd, &crate::filter_dialog::params_of(&d.fields)) {
                 app.filter_preview = None;
-                return crate::filter_dialog::ask_displace_map(app, cmd, d.fields.clone());
+                let result = crate::filter_dialog::ask_displace_map(app, cmd, d.fields.clone());
+                if result.is_err() {
+                    crate::actions::abandoned(app, &d.fields);
+                } else {
+                    // Cancel and an unavailable picker finish before the Displace callback
+                    // runs. Observe the whole file-dialog result, including those exits.
+                    app.after_file_dialog(move |app, result| {
+                        if result.is_err() {
+                            crate::actions::abandoned(app, &d.fields);
+                        }
+                        result
+                    });
+                }
+                return result;
             }
             let (cmd, params) = match crate::smart_ui::confirm_command(app, &d.fields, cmd, crate::filter_dialog::params_of(&d.fields)) {
                 Ok(edit) => edit,
@@ -771,7 +902,11 @@ pub fn confirm(app: &mut PhotocraftApp, id: u64) -> Result<Value, String> {
                 app.ui.view.guide_layout = params;
             }
             if result.is_ok() {
-                crate::filter_dialog::remember(app, &cmd, &d.fields);
+                if crate::adjust_dialog::owns(&d.fields) {
+                    crate::adjust_dialog::remember(app, &d.fields);
+                } else {
+                    crate::filter_dialog::remember(app, &cmd, &d.fields);
+                }
                 // A step dialog of a playing action: the action continues after it.
                 crate::actions::resume(app, &d.fields)?;
             } else {
@@ -792,7 +927,9 @@ pub fn cancel(app: &mut PhotocraftApp, id: u64) -> Result<Value, String> {
         app.ui.dialogs.retain(|child| child.fields.get("__dialog").and_then(Value::as_u64) != Some(id));
     }
     // Cancel on a profile prompt opens neither its file nor the ones still to come.
-    if crate::open_prompt::owns(&closed.fields) {
+    if crate::open_prompt::owns_damage(&closed.fields) {
+        crate::open_prompt::answer_damage(app, false)?;
+    } else if crate::open_prompt::owns(&closed.fields) {
         crate::open_prompt::answer(app, None)?;
     }
     // Cancel on the question whether to replace a file writes nothing.

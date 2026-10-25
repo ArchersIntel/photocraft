@@ -28,6 +28,75 @@ use crate::{ImportResult, IoError};
 pub const MAX_SIDE: u32 = 16_384;
 /// A rasterised fallback layer or a smart-object render never exceeds this many pixels.
 const MAX_RASTER_PIXELS: u64 = 24_000_000;
+/// Largest decoded byte size (RGBA8) accepted for an embedded raster image before resvg decodes
+/// it. resvg/tiny-skia allocate the full intrinsic image before any destination-size scaling,
+/// so a highly compressed PNG or WebP could otherwise trigger gigabyte-scale allocation and
+/// decompression that the destination pixmap's size check never sees.
+const MAX_EMBEDDED_IMAGE_BYTES: u64 = MAX_RASTER_PIXELS * 4;
+
+/// The IHDR width/height of a PNG, read directly from its header (no decoding): the signature
+/// (8 bytes), the IHDR chunk's length and type (8 bytes), then big-endian width and height.
+fn png_dimensions(data: &[u8]) -> Option<(u32, u32)> {
+    let sig = data.get(0..8)?;
+    if sig != [0x89, b'P', b'N', b'G', 0x0D, 0x0A, 0x1A, 0x0A] {
+        return None;
+    }
+    if data.get(12..16)? != b"IHDR" {
+        return None;
+    }
+    let w = u32::from_be_bytes(data.get(16..20)?.try_into().ok()?);
+    let h = u32::from_be_bytes(data.get(20..24)?.try_into().ok()?);
+    Some((w, h))
+}
+
+/// Intrinsic dimensions of a raster image resvg can embed, from its header alone, for formats
+/// where decoding allocates the full image before any destination scaling (PNG, WebP).
+/// Returns `Some(Some((w, h)))` when the format is PNG/WebP and its header parses cleanly,
+/// `Some(None)` when the format is PNG/WebP (by MIME or magic bytes under `"text/plain"`)
+/// and its header is malformed, or `None` for other formats.
+/// A JPEG's size from its frame header (the first SOF marker), without decoding anything.
+fn jpeg_dimensions(data: &[u8]) -> Option<(u32, u32)> {
+    let mut i = 2;
+    loop {
+        if *data.get(i)? != 0xFF {
+            return None;
+        }
+        let marker = *data.get(i + 1)?;
+        match marker {
+            0xFF => i += 1,
+            // SOF0..SOF15, but for DHT (C4), JPG (C8) and DAC (CC).
+            0xC0..=0xCF if !matches!(marker, 0xC4 | 0xC8 | 0xCC) => {
+                let h = u16::from_be_bytes([*data.get(i + 5)?, *data.get(i + 6)?]);
+                let w = u16::from_be_bytes([*data.get(i + 7)?, *data.get(i + 8)?]);
+                return Some((u32::from(w), u32::from(h)));
+            }
+            // Start of scan or end of image before any frame header.
+            0xD8..=0xDA => return None,
+            0x01 | 0xD0..=0xD7 => i += 2,
+            _ => i += 2 + usize::from(u16::from_be_bytes([*data.get(i + 2)?, *data.get(i + 3)?])),
+        }
+    }
+}
+
+fn embedded_image_dimensions(mime: &str, data: &[u8]) -> Option<Option<(u32, u32)>> {
+    match mime {
+        "image/png" => Some(png_dimensions(data)),
+        "image/webp" | "image/gif" => Some(photocraft_codecs::probe_size(data).ok()),
+        "image/jpeg" | "image/jpg" => Some(jpeg_dimensions(data)),
+        "text/plain" => {
+            if data.starts_with(&[0x89, b'P', b'N', b'G', 0x0D, 0x0A, 0x1A, 0x0A]) {
+                Some(png_dimensions(data))
+            } else if (data.get(0..4) == Some(b"RIFF") && data.get(8..12) == Some(b"WEBP")) || data.starts_with(b"GIF8") {
+                Some(photocraft_codecs::probe_size(data).ok())
+            } else if data.starts_with(&[0xFF, 0xD8, 0xFF]) {
+                Some(jpeg_dimensions(data))
+            } else {
+                None
+            }
+        }
+        _ => None,
+    }
+}
 /// Aggregate memory for retained fallback surfaces in the document's pixel format.
 const MAX_PIXEL_BYTES: u64 = 1 << 30;
 /// Estimated peak during raster conversion (retained surfaces + RGBA8 pixmap + f32 staging + tiles).
@@ -139,9 +208,36 @@ fn system_generic_family(_generic: &str) -> Option<String> {
 /// `~/.ssh/...`) into the document. Embedded SVG images get no `<image>` resolution at all
 /// (`usvg` already blanks it for sub-SVGs).
 fn options(fontdb: Arc<usvg::fontdb::Database>) -> usvg::Options<'static> {
+    let default_resolver = usvg::ImageHrefResolver::default_data_resolver();
+    let resolve_data: usvg::ImageHrefDataResolverFn<'static> = Box::new(move |mime, data, opts| {
+        // Reject embedded images whose decoded RGBA storage would exceed the budget before
+        // resvg (which allocates the full intrinsic image before any destination scaling) ever
+        // sees them. Formats without a cheap header probe fall through unchanged; their decode
+        // path is bounded elsewhere or accepted as-is, matching the previous behavior.
+        if let Some(probed) = embedded_image_dimensions(mime, &data) {
+            let (w, h) = probed?;
+            let decoded = u64::from(w).saturating_mul(u64::from(h)).saturating_mul(4);
+            if decoded > MAX_EMBEDDED_IMAGE_BYTES {
+                return None;
+            }
+        }
+        // An embedded `image/svg+xml` value can itself be gzip-compressed (SVGZ-in-data-URL).
+        // The default resolver's sub-SVG loader checks for the gzip magic and decompresses
+        // again with no byte limit of its own. Apply our bounded inflate first: if the data is
+        // gzip-compressed, hand the default resolver the already-decompressed (and
+        // size-checked) bytes, which no longer start with the gzip magic, so it parses them
+        // directly instead of decompressing a second time.
+        if (mime == "image/svg+xml" || mime == "text/plain") && data.starts_with(&[0x1f, 0x8b]) {
+            return match inflate(&data) {
+                Ok(xml) if !xml.starts_with(&[0x1f, 0x8b]) => default_resolver("image/svg+xml", std::sync::Arc::new(xml.into_owned()), opts),
+                _ => None,
+            };
+        }
+        default_resolver(mime, data, opts)
+    });
     usvg::Options {
         resources_dir: None,
-        image_href_resolver: usvg::ImageHrefResolver { resolve_data: usvg::ImageHrefResolver::default_data_resolver(), resolve_string: Box::new(|_, _| None) },
+        image_href_resolver: usvg::ImageHrefResolver { resolve_data, resolve_string: Box::new(|_, _| None) },
         fontdb,
         ..usvg::Options::default()
     }
@@ -174,7 +270,11 @@ fn parse_with(bytes: &[u8], fonts: fn() -> Arc<usvg::fontdb::Database>) -> Resul
     let fontdb = if has_text { fonts() } else { Arc::new(usvg::fontdb::Database::new()) };
     let fontless_text = has_text && fontdb.faces().next().is_none();
     let opt = options(fontdb);
-    let tree = usvg::Tree::from_data(&xml, &opt).map_err(|e| IoError::Svg(e.to_string()))?;
+    // Parse the already-bounded-and-decoded text with from_str, not from_data: from_data
+    // re-checks the gzip magic and would decompress a second time without our size limit if
+    // the inflated content happened to start with a nested gzip stream.
+    let text = std::str::from_utf8(&xml).map_err(|_| IoError::Svg("the SVG is not valid UTF-8".into()))?;
+    let tree = usvg::Tree::from_str(text, &opt).map_err(|e| IoError::Svg(e.to_string()))?;
     Ok(Parsed { tree, fontless_text })
 }
 
@@ -599,7 +699,25 @@ impl Conv {
             _ => FillRule::NonZero,
         };
         let mut sh = ShapeLayer { path: Path { subpaths, fill_rule, inverted: false }, fill, stroke, ..Default::default() };
-        sh.cache = Some(photocraft_vector::render_shape(&sh, self.fmt, self.canvas));
+        // The pixel cache is optional, so it is charged like any other retained raster and left
+        // out (the shape renders from its path) once the budget is spent: compact geometry can
+        // cover the whole canvas in every one of thousands of shapes.
+        let b = data.bounds();
+        let reach = sh.stroke.as_ref().map_or(0.0, |s| s.width);
+        let area = Rect::new(
+            (b.left() - reach).floor() as i32,
+            (b.top() - reach).floor() as i32,
+            (b.right() + reach).ceil() as i32,
+            (b.bottom() + reach).ceil() as i32,
+        )
+        .intersect(&self.canvas);
+        let pixels = u64::from(area.width()) * u64::from(area.height());
+        if self.can_retain_pixels(pixels) {
+            sh.cache = Some(photocraft_vector::render_shape(&sh, self.fmt, self.canvas));
+            let bytes = pixels * self.fmt.bytes_per_pixel() as u64;
+            self.pixel_budget -= bytes;
+            self.retained_pixel_bytes += bytes;
+        }
         Some(Layer::new(self.name(p.id(), 0), LayerContent::Shape(sh)))
     }
 
@@ -1057,5 +1175,67 @@ mod tests {
         let cv = canvas(&tree, &mut w);
         assert_eq!((cv.size.width, cv.size.height), (MAX_SIDE, MAX_SIDE / 2));
         assert_eq!(w.len(), 1);
+    }
+
+    #[test]
+    fn resolve_data_rejects_oversized_and_malformed_embedded_png_and_webp() {
+        let opt = options(Arc::new(usvg::fontdb::Database::new()));
+        let resolve = &opt.image_href_resolver.resolve_data;
+        let img = photocraft_codecs::Image::from_u8(2, 2, photocraft_codecs::ChannelLayout::Rgb, vec![255; 12]).unwrap();
+        let valid_png = photocraft_codecs::encode(&img, photocraft_codecs::Format::Png, &Default::default()).unwrap();
+        assert!(resolve("image/png", Arc::new(valid_png.clone()), &opt).is_some());
+        assert!(resolve("text/plain", Arc::new(valid_png.clone()), &opt).is_some());
+
+        let mut huge_png = valid_png;
+        huge_png[16..20].copy_from_slice(&40_000u32.to_be_bytes());
+        huge_png[20..24].copy_from_slice(&40_000u32.to_be_bytes());
+        assert!(resolve("image/png", Arc::new(huge_png.clone()), &opt).is_none(), "oversized PNG rejected before decode");
+        assert!(resolve("text/plain", Arc::new(huge_png), &opt).is_none(), "oversized mime-less PNG rejected before decode");
+
+        // Malformed WebP header under image/webp or text/plain must be rejected at the probe step.
+        let bad_webp = b"RIFF\x10\x00\x00\x00WEBPVP8 ".to_vec();
+        assert!(resolve("image/webp", Arc::new(bad_webp.clone()), &opt).is_none());
+        assert!(resolve("text/plain", Arc::new(bad_webp), &opt).is_none());
+    }
+
+    #[test]
+    fn jpeg_dimensions_come_from_the_frame_header_and_oversized_jpegs_are_refused() {
+        // SOI, an APP0 segment of length 4, then SOF0 (length 11): 8 bits, height 40000, width 30000.
+        let jpeg = |h: u16, w: u16| {
+            let mut v = vec![0xFF, 0xD8, 0xFF, 0xE0, 0x00, 0x04, 0, 0, 0xFF, 0xC0, 0x00, 0x0B, 8];
+            v.extend(h.to_be_bytes());
+            v.extend(w.to_be_bytes());
+            v.extend([1, 1, 0x11, 0]);
+            v
+        };
+        assert_eq!(jpeg_dimensions(&jpeg(40_000, 30_000)), Some((30_000, 40_000)));
+        assert_eq!(jpeg_dimensions(&[0xFF, 0xD8, 0xFF, 0xDA, 0, 2]), None);
+        assert_eq!(jpeg_dimensions(&[0xFF, 0xD8]), None);
+        let opt = options(Arc::new(usvg::fontdb::Database::new()));
+        let resolve = &opt.image_href_resolver.resolve_data;
+        // 1.2 billion pixels would be 4.8 GB of RGBA before resvg scaled anything down.
+        assert!(resolve("image/jpeg", Arc::new(jpeg(40_000, 30_000)), &opt).is_none());
+        assert!(resolve("text/plain", Arc::new(jpeg(40_000, 30_000)), &opt).is_none());
+    }
+
+    #[test]
+    fn resolve_data_rejects_nested_gzip_and_handles_text_plain_svgz() {
+        use std::io::Write;
+        fn gz(bytes: &[u8]) -> Vec<u8> {
+            let mut e = flate2::write::GzEncoder::new(Vec::new(), flate2::Compression::fast());
+            e.write_all(bytes).unwrap();
+            e.finish().unwrap()
+        }
+        let opt = options(Arc::new(usvg::fontdb::Database::new()));
+        let resolve = &opt.image_href_resolver.resolve_data;
+        let svg = b"<svg xmlns=\"http://www.w3.org/2000/svg\" width=\"4\" height=\"4\"><rect width=\"4\" height=\"4\"/></svg>";
+        let once = gz(svg);
+        assert!(resolve("image/svg+xml", Arc::new(once.clone()), &opt).is_some());
+        assert!(resolve("text/plain", Arc::new(once.clone()), &opt).is_some());
+
+        // Doubly gzip-compressed payload must be rejected rather than decompressed a second time by usvg.
+        let twice = gz(&once);
+        assert!(resolve("image/svg+xml", Arc::new(twice.clone()), &opt).is_none());
+        assert!(resolve("text/plain", Arc::new(twice), &opt).is_none());
     }
 }
