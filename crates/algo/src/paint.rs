@@ -196,10 +196,11 @@ const FRINGE: i32 = 3;
 /// pixels are too far from the seed colour to match, so a plain flood fill leaves them as a halo
 /// between the fill and the line. With `anti_alias`, every non-matching pixel within [`FRINGE`]
 /// pixels of the region is covered by how much of it is the seed colour rather than the
-/// strongest different colour nearby: `1 - d / d_max`, where `d` is its distance from the seed
-/// colour and `d_max` the largest distance in its neighbourhood. A half-line pixel is half
-/// filled, the line itself and flat regions of another colour not at all, and a hard edge stays
-/// hard. Matching pixels keep full coverage (the Magic Wand's own edge blend would under-fill
+/// strongest different colour on its ramp: `1 - d / d_max`, where `d` is its distance from the
+/// seed colour and `d_max` the distance at the top of the ramp (the line). A ramp climbs in
+/// strictly growing steps from the region to the line, so a half-line pixel is half filled, while
+/// the line itself, a flat patch of another colour, a mid-tone line two pixels wide and the far
+/// side of a thin line (whose ramp leads away from the region) are not, and a hard edge stays hard. Matching pixels keep full coverage (the Magic Wand's own edge blend would under-fill
 /// them). Pixels of a similar colour that are not connected to the seed (`contiguous`) are never
 /// covered.
 pub fn bucket_region(img: &[[u8; 4]], area: Rect, seed: (i32, i32), tolerance: f32, contiguous: bool, anti_alias: bool) -> Option<crate::selection::Region> {
@@ -218,6 +219,9 @@ pub fn bucket_region(img: &[[u8; 4]], area: Rect, seed: (i32, i32), tolerance: f
     let target = at(seed.0, seed.1)?;
     // Distance from the seed colour. Against a transparent seed only opacity counts: the colour
     // under zero alpha is meaningless.
+    // The Magic Wand's own rule (`wand_region`), so a pixel it left out for being a different
+    // colour is never mistaken for a disconnected part of the seed's region.
+    let similar = |p: [u8; 4]| (target[3] == 0 && p[3] == 0) || (0..4).all(|c| (i32::from(p[c]) - i32::from(target[c])).abs() <= tol);
     let dist = |p: [u8; 4]| -> i32 {
         if target[3] == 0 { i32::from(p[3]) } else { (0..4).map(|c| (i32::from(p[c]) - i32::from(target[c])).abs()).max().unwrap_or(0) }
     };
@@ -250,24 +254,60 @@ pub fn bucket_region(img: &[[u8; 4]], area: Rect, seed: (i32, i32), tolerance: f
             }
         }
     }
+    const AROUND: [(i32, i32); 8] = [(-1, -1), (0, -1), (1, -1), (-1, 0), (1, 0), (-1, 1), (0, 1), (1, 1)];
+    let touches_region = |c: (i32, i32)| AROUND.iter().any(|&(dx, dy)| matched(c.0 + dx, c.1 + dy));
+    // One step along the ramp: the neighbour farthest from the seed colour (`outward`) or the
+    // one closest to it, provided it is strictly farther or closer than where we stand.
+    let climb = |(pos, cur): ((i32, i32), i32), outward: bool| -> Option<((i32, i32), i32)> {
+        let mut best: Option<((i32, i32), i32)> = None;
+        for (dx, dy) in AROUND {
+            let n = (pos.0 + dx, pos.1 + dy);
+            let Some(q) = at(n.0, n.1) else { continue };
+            let nd = dist(q);
+            let ok = if outward { nd > cur } else { nd < cur };
+            if ok && best.is_none_or(|(_, bd)| if outward { nd > bd } else { nd < bd }) {
+                best = Some((n, nd));
+            }
+        }
+        best
+    };
     for y in grown.y0..grown.y1 {
         for x in grown.x0..grown.x1 {
             if !candidate.get(idx(x, y)).copied().unwrap_or(false) || matched(x, y) {
                 continue;
             }
             let Some(p) = at(x, y) else { continue };
-            let d = dist(p);
             // Similar but not connected to the seed: another region, not an edge.
-            if d <= tol {
+            if similar(p) {
                 continue;
             }
-            let mut d_max = d;
-            for ny in (y - FRINGE).max(area.y0)..(y + FRINGE + 1).min(area.y1) {
-                for nx in (x - FRINGE).max(area.x0)..(x + FRINGE + 1).min(area.x1) {
-                    if let Some(q) = at(nx, ny) {
-                        d_max = d_max.max(dist(q));
-                    }
+            let d = dist(p);
+            // Only a ramp is an edge: pixels ever more different from the seed colour, from the
+            // region out to the line. Walk in to the region (each step strictly closer to the
+            // seed colour) and out to the line's peak (strictly farther). A flat patch of another
+            // colour, a lone mid-tone line or the far side of a thin line has no such ramp, so a
+            // darker pixel nearby cannot cover it.
+            let (mut cur, mut cd) = ((x, y), d);
+            let mut reaches = touches_region(cur);
+            for _ in 0..FRINGE {
+                if reaches {
+                    break;
                 }
+                let Some((n, nd)) = climb((cur, cd), false) else { break };
+                (cur, cd) = (n, nd);
+                reaches = touches_region(cur);
+            }
+            if !reaches {
+                continue;
+            }
+            let (mut peak, mut pd) = ((x, y), d);
+            for _ in 0..FRINGE {
+                let Some((n, nd)) = climb((peak, pd), true) else { break };
+                (peak, pd) = (n, nd);
+            }
+            let d_max = pd;
+            if d_max <= d || d_max <= 0 {
+                continue;
             }
             let coverage = 1.0 - d as f32 / d_max as f32;
             if coverage >= 0.04
@@ -507,6 +547,84 @@ mod tests {
         assert!((region.at(10, 2) - 0.4).abs() < 0.1, "{}", region.at(10, 2));
         assert!((region.at(9, 2) - 0.8).abs() < 0.1, "{}", region.at(9, 2));
         assert_eq!(region.at(15, 2), 0.0, "beyond the stroke is a separate region");
+    }
+
+    /// Greyscale rows, three tall, from one brightness per column.
+    fn grey_sheet(cols: &[u8]) -> (Vec<[u8; 4]>, Rect) {
+        let a = Rect::new(0, 0, cols.len() as i32, 3);
+        (cols.iter().cycle().take(cols.len() * 3).map(|&v| [v, v, v, 255]).collect(), a)
+    }
+
+    #[test]
+    fn bucket_fringe_ignores_flat_patches_and_lines_that_are_not_a_ramp() {
+        let covered = |cols: &[u8]| {
+            let (img, a) = grey_sheet(cols);
+            let r = bucket_region(&img, a, (0, 1), 8.0, true, true).unwrap();
+            (0..cols.len() as i32).map(|x| r.at(x, 1)).collect::<Vec<_>>()
+        };
+        // A two-colour boundary stays hard.
+        assert_eq!(covered(&[255, 255, 0, 0]), [1.0, 1.0, 0.0, 0.0]);
+        // A flat grey patch beside the seed with a black line within 3 px is another region.
+        let flat = covered(&[255, 255, 128, 128, 128, 0, 0]);
+        assert_eq!(&flat[2..4], [0.0, 0.0], "{flat:?}");
+        // A light line two pixels wide beside a dark outline is not painted either.
+        let light = covered(&[255, 255, 200, 200, 0, 0]);
+        assert_eq!(&light[2..4], [0.0, 0.0], "{light:?}");
+        // A real ramp still is, in proportion.
+        let ramp = covered(&[255, 255, 192, 128, 64, 0, 0]);
+        assert!((ramp[2] - 0.75).abs() < 0.05 && (ramp[3] - 0.5).abs() < 0.05 && ramp[5] == 0.0, "{ramp:?}");
+    }
+
+    #[test]
+    fn bucket_fringe_stops_at_the_far_side_of_a_thin_line() {
+        // seed | ramp | 1 px line | ramp | other region, all one tolerance apart.
+        let (img, a) = grey_sheet(&[255, 255, 128, 0, 128, 255, 255]);
+        let r = bucket_region(&img, a, (0, 1), 8.0, true, true).unwrap();
+        assert!((r.at(2, 1) - 0.5).abs() < 0.05);
+        assert_eq!((r.at(3, 1), r.at(4, 1), r.at(5, 1), r.at(6, 1)), (0.0, 0.0, 0.0, 0.0), "the other side of the line");
+    }
+
+    #[test]
+    fn bucket_fringe_covers_a_faint_coloured_stroke_pixel_next_to_a_transparent_seed() {
+        // Transparent sheet, a red stroke whose edge pixel is only 8 % opaque.
+        let a = Rect::new(0, 0, 6, 3);
+        let mut img = vec![[0u8; 4]; 18];
+        for y in 0..3 {
+            for (x, alpha) in [(3usize, 20u8), (4, 128), (5, 255)] {
+                img[y * 6 + x] = [255, 0, 0, alpha];
+            }
+        }
+        let r = bucket_region(&img, a, (0, 1), 8.0, true, true).unwrap();
+        assert!((r.at(3, 1) - (1.0 - 20.0 / 255.0)).abs() < 0.05, "{}", r.at(3, 1));
+        assert!((r.at(4, 1) - 0.5).abs() < 0.05);
+        assert_eq!(r.at(5, 1), 0.0);
+    }
+
+    /// Release timing on a 24 MP sheet (`cargo test -p photocraft-algo --release -- --ignored --nocapture`).
+    #[test]
+    #[ignore]
+    fn bucket_region_timing_on_24_megapixels() {
+        use std::time::Instant;
+        let (w, h) = (6000i32, 4000i32);
+        let a = Rect::new(0, 0, w, h);
+        // White sheet crossed by soft grey lines every 40 px, plus noise-like texture.
+        let img: Vec<[u8; 4]> = (0..w * h)
+            .map(|i| {
+                let (x, y) = (i % w, i / w);
+                let line = [0.0, 0.25, 0.5, 1.0, 0.5, 0.25][(x % 40).min(5) as usize] * f32::from(x % 40 < 6) + if y % 53 < 2 { 0.5 } else { 0.0 };
+                let v = (255.0 * (1.0 - line.min(1.0))) as u8;
+                let t = ((x * 7 + y * 13) % 5) as u8;
+                [v.saturating_sub(t), v.saturating_sub(t), v.saturating_sub(t), 255]
+            })
+            .collect();
+        for (contiguous, aa) in [(true, false), (true, true), (false, false), (false, true)] {
+            let t = Instant::now();
+            let r = bucket_region(&img, a, (5, 5), 32.0, contiguous, aa).unwrap();
+            println!("bucket_region contiguous={contiguous} aa={aa}: {:?} ({} bytes)", t.elapsed(), r.mask.len());
+        }
+        let t = Instant::now();
+        let r = crate::selection::wand_region(&img, a, (5, 5), 32.0, true, true).unwrap();
+        println!("wand_region (previous bucket path) contiguous aa: {:?} ({} bytes)", t.elapsed(), r.mask.len());
     }
 
     #[test]
