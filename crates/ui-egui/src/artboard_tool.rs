@@ -182,7 +182,9 @@ fn follow(d: &mut ArtboardDrag, p: [f64; 2], mods: egui::Modifiers) {
 
 /// Pointer input for the Artboard tool. Returns true when the event was its own.
 pub fn pointer(app: &mut PhotocraftApp, ev: ToolEvent, mods: egui::Modifiers) -> bool {
-    if app.ui.tool != Tool::Artboard {
+    // ⌘ is the Move tool (`hold_keys::cmd_moves`): a press with it held is not this tool's,
+    // so it drags a guide or the layer (#6288). A drag already under way keeps its events.
+    if app.ui.tool != Tool::Artboard || (app.ui.artboard_tool.drag.is_none() && crate::canvas::event_tool(app, mods) != Tool::Artboard) {
         return false;
     }
     let Some(doc) = app.session.active().map(|d| d.doc.clone()) else { return true };
@@ -302,14 +304,14 @@ pub fn options_bar(app: &mut PhotocraftApp, ui: &mut egui::Ui, tool: Tool) -> bo
         let mut preset = preset.unwrap_or_default();
         let mut opts: Vec<(String, &str)> = vec![(String::new(), tl!("Custom"))];
         opts.extend(photocraft_engine::artboard_cmds::PRESETS.iter().map(|(n, _, _)| (n.to_string(), *n)));
-        if crate::widgets::dropdown(ui, "artboard-tool-preset", &mut preset, &opts, 150.0) && !preset.is_empty() {
+        if crate::widgets::dropdown(ui, "artboard-tool-preset", tl!("Preset"), &mut preset, &opts, 150.0) && !preset.is_empty() {
             edit = Some(json!({"layer": id.0, "preset": preset}));
         }
         let (mut w, mut h) = ((r[2] - r[0]) as f32, (r[3] - r[1]) as f32);
         ui.label(egui::RichText::new(tl!("W")).color(t.text_dim));
-        let cw = crate::widgets::value_field(ui, &mut w, 1.0..=300_000.0, "px", 64.0).changed();
+        let cw = crate::widgets::value_field(ui, &mut w, 1.0..=300_000.0, "px", 64.0).accessible_name(tl!("Width")).changed();
         ui.label(egui::RichText::new(tl!("H")).color(t.text_dim));
-        let ch = crate::widgets::value_field(ui, &mut h, 1.0..=300_000.0, "px", 64.0).changed();
+        let ch = crate::widgets::value_field(ui, &mut h, 1.0..=300_000.0, "px", 64.0).accessible_name(tl!("Height")).changed();
         if cw || ch {
             edit = Some(json!({"layer": id.0, "width": w.round(), "height": h.round(), "coalesce": format!("artboard-tool-wh-{}", id.0)}));
         }

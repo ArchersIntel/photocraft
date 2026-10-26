@@ -54,8 +54,10 @@ pub struct StripOut {
 pub const CHEVRON_W: f32 = 18.0;
 
 /// Draw the » overflow button at `r`: hover tip `tip`, listing the tabs named by `labels` at the
-/// indices in `overflow`. A picked index is left in `picked`.
-pub fn overflow_button(ui: &mut Ui, id: egui::Id, r: Rect, tip: &str, labels: &[&str], overflow: &[usize], picked: &mut Option<usize>) {
+/// indices in `overflow`, the `checked` one with a check mark as in the menu bar's menus. A picked
+/// index is left in `picked`.
+#[allow(clippy::too_many_arguments)]
+pub fn overflow_button(ui: &mut Ui, id: egui::Id, r: Rect, tip: &str, labels: &[&str], overflow: &[usize], checked: Option<usize>, picked: &mut Option<usize>) {
     let t = Tokens::get(ui.ctx());
     let resp = ui.interact(r, id, Sense::click());
     let mut paint_ui = ui.new_child(egui::UiBuilder::new().max_rect(r));
@@ -64,14 +66,14 @@ pub fn overflow_button(ui: &mut Ui, id: egui::Id, r: Rect, tip: &str, labels: &[
         paint_ui.painter().rect_filled(r.shrink2(vec2(1.0, 3.0)), t.radius_sm, t.hover.gamma_multiply(0.6));
     }
     crate::icons::paint(&paint_ui, r, "chevrons-right", 12.0, if resp.hovered() { t.text } else { t.text_dim });
-    resp.widget_info(|| egui::WidgetInfo::labeled(egui::WidgetType::Button, ui.is_enabled(), tip));
+    resp.widget_info(|| egui::WidgetInfo::labeled(egui::Role::Button, ui.is_enabled(), tip));
     let resp = resp.on_hover_text(tip);
     egui::Popup::menu(&resp).show(|ui| {
         ui.set_min_width(140.0);
         for &i in overflow {
-            if let Some(name) = labels.get(i)
-                && ui.button(*name).clicked()
-            {
+            let Some(name) = labels.get(i) else { continue };
+            let text = if checked.is_some() { format!("{} {name}", if checked == Some(i) { "✔" } else { "  " }) } else { (*name).to_owned() };
+            if ui.button(text).clicked() {
                 *picked = Some(i);
                 ui.close();
             }
@@ -161,7 +163,7 @@ fn tabs_in(
     if !f.overflow.is_empty() && f.overflow_width > 0.0 {
         let r = Rect::from_min_size(pos2(x, area.top()), vec2(f.overflow_width, area.height()));
         let mut picked = None;
-        overflow_button(ui, id.with("tab-overflow"), r, tl!("More panels"), translated_tabs, &f.overflow, &mut picked);
+        overflow_button(ui, id.with("tab-overflow"), r, tl!("More panels"), translated_tabs, &f.overflow, None, &mut picked);
         if let Some(i) = picked {
             out.clicked = true;
             *selected = i;
@@ -328,8 +330,16 @@ mod tests {
             let area = Rect::from_min_size(pos2(20.0, 20.0), vec2(width, 26.0));
             let mut selected = 3;
             let mut output = ctx.run_ui(egui::RawInput::default(), |ui| {
-                let out =
-                    pro_tabs(ui, ui.id().with("tiny-tabs"), area, area.right(), &["Color", "Swatches", "Gradients", "Patterns"], &mut selected, false, false);
+                let out = pro_tabs(
+                    ui,
+                    ui.scope_id().with("tiny-tabs"),
+                    area,
+                    area.right(),
+                    &["Color", "Swatches", "Gradients", "Patterns"],
+                    &mut selected,
+                    false,
+                    false,
+                );
                 assert!(out.tabs.iter().any(|(i, _)| *i == 3));
                 for (_, rect) in &out.tabs {
                     assert!(rect.left() >= area.left() && rect.right() <= area.right() + 0.001, "{width}: {rect:?}");
@@ -358,7 +368,7 @@ mod tests {
                     let mut picked = None;
                     let input = egui::RawInput { events: vec![egui::Event::PointerMoved(rect.center())], ..Default::default() };
                     let mut output = ctx.run_ui(input, |ui| {
-                        overflow_button(ui, ui.id().with("tiny-overflow"), rect, "More panels", &["Layers"], &[0], &mut picked);
+                        overflow_button(ui, ui.scope_id().with("tiny-overflow"), rect, "More panels", &["Layers"], &[0], None, &mut picked);
                     });
                     output.textures_delta.clear();
                     let mut icons = 0;

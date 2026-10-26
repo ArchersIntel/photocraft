@@ -116,8 +116,8 @@ fn ordinary_panel_tab_drag_enters_shared_docking_and_can_redock_into_another_tab
     drag(&mut h, source, egui::pos2(160.0, 140.0));
     let layout = h.state().ui.docking.as_ref().expect("ordinary tab drag starts shared docking");
     assert!(layout.floating.iter().any(|g| g.panels.contains(&"layers".into())), "{layout:?}");
-    let source = h.ctx.read_response(egui::Id::new("photocraft-panel-docking").with(("tab", &"layers".to_string()))).unwrap().rect.center();
-    let destination = h.ctx.read_response(egui::Id::new("photocraft-panel-docking").with(("tab", &"properties".to_string()))).unwrap().rect.center();
+    let source = h.ctx.read_response(egui::Id::unique("photocraft-panel-docking").with(("tab", &"layers".to_string()))).unwrap().rect.center();
+    let destination = h.ctx.read_response(egui::Id::unique("photocraft-panel-docking").with(("tab", &"properties".to_string()))).unwrap().rect.center();
     drag(&mut h, source, destination);
     let layout = h.state().ui.docking.as_ref().unwrap();
     assert!(!layout.floating.iter().any(|g| g.panels.contains(&"layers".into())));
@@ -134,8 +134,8 @@ fn brushes_tab_drag_floats_and_can_redock_into_another_tab_group() {
     let layout = h.state().ui.docking.as_ref().expect("brushes drag starts shared docking");
     assert!(layout.floating.iter().any(|group| group.panels.contains(&"brushes".into())), "{layout:?}");
 
-    let source = h.ctx.read_response(egui::Id::new("photocraft-panel-docking").with(("tab", &"brushes".to_string()))).unwrap().rect.center();
-    let destination = h.ctx.read_response(egui::Id::new("photocraft-panel-docking").with(("tab", &"layers".to_string()))).unwrap().rect.center();
+    let source = h.ctx.read_response(egui::Id::unique("photocraft-panel-docking").with(("tab", &"brushes".to_string()))).unwrap().rect.center();
+    let destination = h.ctx.read_response(egui::Id::unique("photocraft-panel-docking").with(("tab", &"layers".to_string()))).unwrap().rect.center();
     drag(&mut h, source, destination);
     let layout = h.state().ui.docking.as_ref().unwrap();
     assert!(!layout.floating.iter().any(|group| group.panels.contains(&"brushes".into())));
@@ -231,7 +231,7 @@ fn floating_group_titles_are_opaque_in_studio_themes() {
         app,
     );
     h.run_steps(5);
-    let area = h.ctx.memory(|m| m.area_rect(egui::Id::new("photocraft-panel-docking").with(("floating", &"swatches".to_string())))).unwrap();
+    let area = h.ctx.memory(|m| m.area_rect(egui::Id::unique("photocraft-panel-docking").with(("floating", &"swatches".to_string())))).unwrap();
     let image = h.render().unwrap();
     let ppp = image.width() as f32 / 1280.0;
     let strip = egui::Rect::from_min_size(area.min, vec2(area.width(), 40.0)).shrink(2.0);
@@ -379,7 +379,7 @@ fn populated_canvas_keeps_a_real_opacity_edit_after_floating_and_redocking() {
     );
     h.input_mut().max_texture_side = Some(8192);
     h.run_steps(5);
-    let floating = h.ctx.memory(|m| m.area_rect(egui::Id::new("photocraft-panel-docking").with(("floating", &"properties".to_string())))).unwrap();
+    let floating = h.ctx.memory(|m| m.area_rect(egui::Id::unique("photocraft-panel-docking").with(("floating", &"properties".to_string())))).unwrap();
     let mut sliders: Vec<_> = h.ctx.viewport(|vp| {
         vp.prev_pass
             .widgets
@@ -404,8 +404,8 @@ fn populated_canvas_keeps_a_real_opacity_edit_after_floating_and_redocking() {
         std::fs::create_dir_all(directory).unwrap();
         h.render().unwrap().save(directory.join("photocraft-populated-opacity-floating.png")).unwrap();
     }
-    let from = h.ctx.read_response(egui::Id::new("photocraft-panel-docking").with(("tab", &"properties".to_string()))).unwrap().rect.center();
-    let to = h.ctx.read_response(egui::Id::new("photocraft-panel-docking").with(("tab", &"layers".to_string()))).unwrap().rect.center();
+    let from = h.ctx.read_response(egui::Id::unique("photocraft-panel-docking").with(("tab", &"properties".to_string()))).unwrap().rect.center();
+    let to = h.ctx.read_response(egui::Id::unique("photocraft-panel-docking").with(("tab", &"layers".to_string()))).unwrap().rect.center();
     drag(&mut h, from, to);
     assert!(h.state().ui.docking.as_ref().unwrap().floating.iter().all(|group| !group.panels.iter().any(|panel| panel == "properties")));
     assert_eq!(h.state().session.active().unwrap().doc.layer(layer).unwrap().opacity, opacity);
@@ -462,7 +462,7 @@ fn first_legacy_drag_workspace_switch_preserves_custom_and_legacy_destinations()
             // One frame installs the first legacy drag; no shared dock has rendered yet.
             h.run_steps(1);
             assert!(h.state().ui.docking.is_some());
-            let origin = egui::Id::new("photocraft-panel-docking").with("legacy-origin");
+            let origin = egui::Id::unique("photocraft-panel-docking").with("legacy-origin");
             assert!(h.ctx.data_mut(|data| data.get_temp::<LegacyDrag>(origin)).unwrap().layout.is_none());
             let ctx = h.ctx.clone();
             let command = if customized_destination { "window.workspace.select" } else { "window.workspace.painting" };
@@ -561,10 +561,13 @@ fn legacy_dock_width_is_consumed_by_custom_renderer_and_clamped_to_existing_rang
     app.run("window.panel.float", json!({"panel":"properties"})).unwrap();
     let mut h = harness(app, vec2(1280.0, 800.0));
     let ctx = h.ctx.clone();
-    for (requested, expected) in [(410.0, 410.0), (900.0, 520.0), (20.0, 250.0)] {
+    // A 1280-point window: the dock may take all but 400 points (#7896), so 700 is no longer
+    // cut to 520.
+    for (requested, expected) in [(410.0, 410.0), (700.0, 700.0), (900.0, 880.0), (20.0, 250.0)] {
         assert_eq!(control_set(h.state_mut(), &ctx, json!({"dockWidth":requested}))["ok"], true);
         h.run_steps(2);
-        let state = egui::containers::panel::PanelState::load(&h.ctx, egui::Id::new("shared-panel-dock")).unwrap();
+        let key = crate::panel_docking::shared_panel_state_id(&h.ctx).unwrap_or_else(|| crate::panels::panel_state_id(&h.ctx, "shared-panel-dock"));
+        let state = egui::containers::panel::PanelState::load(&h.ctx, key).expect("the custom dock persisted its size");
         assert!((state.outer_rect.width() - expected).abs() < 1.0, "{} / {expected}", state.outer_rect.width());
         assert!(h.ctx.data(|data| data.get_temp::<f32>(crate::panels::dock_width_id())).is_none());
     }
@@ -583,6 +586,23 @@ fn explicit_reveal_activates_existing_tab_and_expands_custom_group() {
     let before = app.ui.docking.clone();
     assert!(app.run("window.panel.layers", json!({"show":"yes"})).is_err());
     assert_eq!(app.ui.docking, before);
+}
+
+// #2455 in a custom workspace: the pro Color field fills a tall floating group, not 120 pt.
+#[test]
+fn pro_color_field_fills_a_tall_custom_group() {
+    let mut app = app();
+    app.run("window.panel.float", json!({"panel":"color","x":40,"y":60,"width":320,"height":560})).unwrap();
+    assert!(app.ui.docking.is_some());
+    let h = harness(app, vec2(1280.0, 800.0));
+    // The SV field and the 14 pt hue strip beside it are draggable, equally tall and 8 pt apart.
+    let drags: Vec<egui::Rect> =
+        h.ctx.viewport(|v| v.this_pass.widgets.layers().flat_map(|(_, w)| w).filter(|w| w.sense.senses_drag()).map(|w| w.rect).collect());
+    let field = drags
+        .iter()
+        .find(|f| drags.iter().any(|s| s.width() == 14.0 && s.top() == f.top() && s.height() == f.height() && (s.left() - f.right() - 8.0).abs() < 0.5))
+        .expect("Color field with its hue strip");
+    assert!(field.height() > 300.0, "field stays short in a 560 pt group: {field:?}");
 }
 
 // #4028: in a custom workspace too, a new adjustment layer brings Properties to the front.
@@ -630,7 +650,7 @@ fn customized_panel_menus_and_rail_remain_reachable_after_float_and_restore() {
     let mut h = harness(app, vec2(1280.0, 800.0));
     assert!(h.query_all_by_label("Panel menu").count() > 0);
     assert!(h.query_all_by_label("Color & Swatches").count() > 0);
-    let floating = h.ctx.memory(|memory| memory.area_rect(egui::Id::new("photocraft-panel-docking").with(("floating", &"swatches".to_string())))).unwrap();
+    let floating = h.ctx.memory(|memory| memory.area_rect(egui::Id::unique("photocraft-panel-docking").with(("floating", &"swatches".to_string())))).unwrap();
     let first = h.query_all_by_label("Panel menu").find(|node| floating.contains_rect(node.rect())).unwrap().rect().center();
     h.hover_at(first);
     for pressed in [true, false] {
@@ -654,6 +674,45 @@ fn customized_panel_menus_and_rail_remain_reachable_after_float_and_restore() {
     );
     menu.run_steps(2);
     assert!(menu.query_all_by_label("New Swatch…").count() > 0);
+}
+
+/// A floated Color panel's menu still picks its mode (#6000): the shared docking renderer has
+/// its own panel menu, separate from the legacy dock's.
+#[test]
+fn floated_color_panel_menu_picks_the_mode() {
+    let mut app = app();
+    app.run("window.panel.float", json!({"panel":"color","x":20,"y":40})).unwrap();
+    let mut h = harness(app, vec2(1280.0, 800.0));
+    let floating = h.ctx.memory(|memory| memory.area_rect(egui::Id::unique("photocraft-panel-docking").with(("floating", &"color".to_string())))).unwrap();
+    let button = h.query_all_by_label("Panel menu").find(|node| floating.contains_rect(node.rect())).unwrap().rect().center();
+    h.hover_at(button);
+    for pressed in [true, false] {
+        h.event(Event::PointerButton { pos: button, button: PointerButton::Primary, pressed, modifiers: Modifiers::NONE });
+        h.run_steps(1);
+    }
+    h.run_steps(2);
+    h.get_by_label("   RGB Sliders").click();
+    h.run_steps(2);
+    assert_eq!(h.state().ui.color_panel.mode, crate::state::ColorPanelMode::RgbSliders);
+}
+
+#[test]
+fn actions_panel_menu_includes_load_and_save_actions() {
+    let mut ready = false;
+    let mut menu = Harness::builder().build_ui_state(
+        move |ui, app: &mut PhotocraftApp| {
+            if !ready {
+                PhotocraftApp::setup_context(ui.ctx(), crate::theme::ThemeKind::ProMedium);
+                ready = true;
+            }
+            panel_menu(app, ui, "actions");
+        },
+        self::app(),
+    );
+    menu.run_steps(2);
+    assert!(menu.query_all_by_label("Load Actions…").count() > 0);
+    assert!(menu.query_all_by_label("Save Actions…").count() > 0);
+    assert!(menu.query_all_by_label("New Action…").count() > 0);
 }
 
 #[test]
@@ -699,8 +758,8 @@ fn floating_group_grip_redocks_all_tabs_as_one_atomic_move() {
     app.run("window.panel.float", json!({"panel":"swatches","x":30,"y":60})).unwrap();
     app.run("window.panel.move", json!({"panel":"patterns","anchor":"swatches"})).unwrap();
     let mut h = harness(app, vec2(1280.0, 800.0));
-    let from = h.ctx.read_response(egui::Id::new("photocraft-panel-docking").with(("move-group", Some(&"swatches".to_string())))).unwrap().rect.center();
-    let to = h.ctx.read_response(egui::Id::new("photocraft-panel-docking").with(("tab", &"layers".to_string()))).unwrap().rect.center();
+    let from = h.ctx.read_response(egui::Id::unique("photocraft-panel-docking").with(("move-group", Some(&"swatches".to_string())))).unwrap().rect.center();
+    let to = h.ctx.read_response(egui::Id::unique("photocraft-panel-docking").with(("tab", &"layers".to_string()))).unwrap().rect.center();
     drag(&mut h, from, to);
     let layout = h.state().ui.docking.as_ref().unwrap();
     assert!(layout.floating.iter().all(|group| !group.panels.iter().any(|id| id == "swatches" || id == "patterns")));
@@ -750,4 +809,14 @@ fn native_tab_reorder_stays_native_until_drag_crosses_the_strip() {
     let layers = tabs.iter().position(|(_, label)| *label == "Layers").unwrap();
     let channels = tabs.iter().position(|(_, label)| *label == "Channels").unwrap();
     assert!(channels < layers, "upstream native reorder remains effective");
+}
+
+/// #7896: the dock's widest is the window less what the toolbar and the canvas keep, never
+/// below the old 520 points, so a wide window allows a two-column dock.
+#[test]
+fn the_dock_can_be_as_wide_as_the_window_allows() {
+    for (window, max) in [(2560.0, 2160.0), (1280.0, 880.0), (800.0, 520.0), (f32::NAN, 520.0)] {
+        let range = crate::panels::dock_width_range(window);
+        assert_eq!((*range.start(), *range.end()), (crate::panels::DOCK_MIN_WIDTH, max), "{window}");
+    }
 }
