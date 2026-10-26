@@ -622,9 +622,11 @@ mod tests {
             let r = bucket_region(&img, a, (5, 5), 32.0, contiguous, aa).unwrap();
             println!("bucket_region contiguous={contiguous} aa={aa}: {:?} ({} bytes)", t.elapsed(), r.mask.len());
         }
-        let t = Instant::now();
-        let r = crate::selection::wand_region(&img, a, (5, 5), 32.0, true, true).unwrap();
-        println!("wand_region (previous bucket path) contiguous aa: {:?} ({} bytes)", t.elapsed(), r.mask.len());
+        for contiguous in [true, false] {
+            let t = Instant::now();
+            let r = crate::selection::wand_region(&img, a, (5, 5), 32.0, contiguous, true).unwrap();
+            println!("wand_region (previous bucket path) contiguous={contiguous} aa: {:?} ({} bytes)", t.elapsed(), r.mask.len());
+        }
     }
 
     #[test]
