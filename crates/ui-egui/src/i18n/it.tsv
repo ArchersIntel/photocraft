@@ -161,6 +161,8 @@
 	Content-Aware Fill…	Riempimento in base al contenuto…
 	Generative Fill…	Riempimento generativo…
 	Generative Remove	Rimozione generativa
+	(not configured)	(non configurato)
+	Set up a ComfyUI or AUTOMATIC1111 server in Preferences › Integrations first.	Configura prima un server ComfyUI o AUTOMATIC1111 in Preferenze › Integrazioni.
 	Refresh	Aggiorna
 	Automatic (the server's choice)	Automatico (scelta del server)
 	Generative Fill needs a selection on a pixel layer	Il riempimento generativo richiede una selezione su un livello pixel

@@ -217,6 +217,8 @@
 	Content-Aware Fill…	Γέμισμα βάσει περιεχομένου…
 	Generative Fill…	Παραγωγικό γέμισμα…
 	Generative Remove	Παραγωγική αφαίρεση
+	(not configured)	(δεν έχει ρυθμιστεί)
+	Set up a ComfyUI or AUTOMATIC1111 server in Preferences › Integrations first.	Ρυθμίστε πρώτα έναν διακομιστή ComfyUI ή AUTOMATIC1111 στις Προτιμήσεις › Ενσωματώσεις.
 	Refresh	Ανανέωση
 	Automatic (the server's choice)	Αυτόματα (επιλογή του διακομιστή)
 	Generative Fill needs a selection on a pixel layer	Το Παραγωγικό γέμισμα απαιτεί επιλογή σε επίπεδο εικονοστοιχείων

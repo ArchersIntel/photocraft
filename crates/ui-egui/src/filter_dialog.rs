@@ -791,7 +791,37 @@ pub fn body(ui: &mut egui::Ui, f: &mut Map<String, Value>) {
     if crate::select_mask_view::owns(f) {
         crate::select_mask_view::controls(ui, f);
     }
-    for p in parse_spec(&spec) {
+    // Generative Fill keeps its sampler controls and server override behind a collapsed Advanced
+    // section, so the ordinary dialog is the prompt and the model (#6054).
+    let (main, advanced): (Vec<Param>, Vec<Param>) = parse_spec(&spec).into_iter().partition(|p| !is_advanced_param(&cmd, &p.key));
+    param_rows(ui, f, &cmd, &t, main);
+    if !advanced.is_empty() {
+        egui::CollapsingHeader::new(tl!("Advanced")).id_salt(format!("flt-advanced-{cmd}")).default_open(false).show(ui, |ui| param_rows(ui, f, &cmd, &t, advanced));
+    }
+    if cmd == REPLACE_COLOR {
+        replace_color_result(ui, f);
+    }
+    // Read-only context the dialog opener supplies (e.g. the monitor profile in use).
+    if let Some(note) = f.get("__note").and_then(Value::as_str) {
+        ui.add_space(4.0);
+        ui.add(egui::Label::new(egui::RichText::new(note).color(t.text_dim)).wrap());
+    }
+    if let Some(mut preview) = f.get("__preview").and_then(Value::as_bool) {
+        ui.add_space(4.0);
+        crate::widgets::checkbox(ui, &mut preview, tl!("Preview"));
+        f.insert("__preview".into(), json!(preview));
+    }
+}
+
+/// Whether `key` of `cmd` belongs in the dialog's collapsed Advanced section.
+pub(crate) fn is_advanced_param(cmd: &str, key: &str) -> bool {
+    matches!(cmd, "edit.generativeFill" | "edit.generativeRemove") && matches!(key, "negativePrompt" | "backend" | "host" | "steps" | "guidance" | "strength" | "resolution" | "seed")
+}
+
+/// The rows for `params` of the dialog for `cmd`.
+fn param_rows(ui: &mut egui::Ui, f: &mut Map<String, Value>, cmd: &str, t: &Tokens, params: Vec<Param>) {
+    let cmd = cmd.to_string();
+    for p in params {
         if zoom_center::owns(&cmd, f) && matches!(p.key.as_str(), "centerX" | "centerY") {
             if p.key == "centerX" {
                 zoom_center::row(ui, f);
@@ -1008,19 +1038,6 @@ pub fn body(ui: &mut egui::Ui, f: &mut Map<String, Value>) {
                 f.insert(p.key, json!(v.round() as i64));
             }
         }
-    }
-    if cmd == REPLACE_COLOR {
-        replace_color_result(ui, f);
-    }
-    // Read-only context the dialog opener supplies (e.g. the monitor profile in use).
-    if let Some(note) = f.get("__note").and_then(Value::as_str) {
-        ui.add_space(4.0);
-        ui.add(egui::Label::new(egui::RichText::new(note).color(t.text_dim)).wrap());
-    }
-    if let Some(mut preview) = f.get("__preview").and_then(Value::as_bool) {
-        ui.add_space(4.0);
-        crate::widgets::checkbox(ui, &mut preview, tl!("Preview"));
-        f.insert("__preview".into(), json!(preview));
     }
 }
 
@@ -2892,6 +2909,16 @@ mod generative_fill_spec_tests {
         assert!(matches!(kinds.get("backend"), Some(Kind::Choice { options, .. }) if options == &["comfyui", "a1111"]));
         assert!(matches!(kinds.get("output"), Some(Kind::Choice { .. })));
         assert!(matches!(kinds.get("steps"), Some(Kind::Range { .. })));
+        // The sampler controls and the server override are the collapsed Advanced section; the
+        // prompt, model, edge softness, colour match and output stay on the dialog itself.
+        for key in ["negativePrompt", "backend", "host", "steps", "guidance", "strength", "resolution", "seed"] {
+            assert!(is_advanced_param("edit.generativeFill", key), "{key}");
+            assert!(is_advanced_param("edit.generativeRemove", key), "{key}");
+        }
+        for key in ["prompt", "model", "feather", "colorMatch", "output"] {
+            assert!(!is_advanced_param("edit.generativeFill", key), "{key}");
+        }
+        assert!(!is_advanced_param("filter.blur.gaussian", "steps"), "other dialogs keep every row visible");
         // With a model list, the replaced notation parses as a menu defaulting to the chosen one.
         let with_models = spec.replace("\"model\":text", "\"model\":\"a.safetensors|b-inpaint.safetensors\"=\"b-inpaint.safetensors\"");
         let model = parse_spec(&with_models).into_iter().find(|p| p.key == "model").expect("model");

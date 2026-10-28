@@ -154,6 +154,8 @@
 	Content-Aware Fill…	Inhoudsbewust vullen…
 	Generative Fill…	Generatief vullen…
 	Generative Remove	Generatief verwijderen
+	(not configured)	(niet ingesteld)
+	Set up a ComfyUI or AUTOMATIC1111 server in Preferences › Integrations first.	Stel eerst een ComfyUI- of AUTOMATIC1111-server in via Voorkeuren › Integraties.
 	Refresh	Vernieuwen
 	Automatic (the server's choice)	Automatisch (keuze van de server)
 	Generative Fill needs a selection on a pixel layer	Generatief vullen vereist een selectie op een pixellaag

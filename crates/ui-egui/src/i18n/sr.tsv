@@ -153,6 +153,8 @@
 	Content-Aware Fill…	Popuna prema sadržaju…
 	Generative Fill…	Generativna popuna…
 	Generative Remove	Generativno uklanjanje
+	(not configured)	(nije podešeno)
+	Set up a ComfyUI or AUTOMATIC1111 server in Preferences › Integrations first.	Prvo podesite ComfyUI ili AUTOMATIC1111 server u Podešavanja › Integracije.
 	Refresh	Osveži
 	Automatic (the server's choice)	Automatski (izbor servera)
 	Generative Fill needs a selection on a pixel layer	Generativna popuna zahteva selekciju na piksel sloju

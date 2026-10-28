@@ -68,6 +68,8 @@
 	Content-Aware Fill…	Tô theo nội dung…
 	Generative Fill…	Tô tạo sinh…
 	Generative Remove	Xoá tạo sinh
+	(not configured)	(chưa thiết lập)
+	Set up a ComfyUI or AUTOMATIC1111 server in Preferences › Integrations first.	Hãy thiết lập máy chủ ComfyUI hoặc AUTOMATIC1111 trong Tùy chọn › Tích hợp trước.
 	Refresh	Làm mới
 	Automatic (the server's choice)	Tự động (do máy chủ chọn)
 	Generative Fill needs a selection on a pixel layer	Tô tạo sinh cần một vùng chọn trên lớp điểm ảnh

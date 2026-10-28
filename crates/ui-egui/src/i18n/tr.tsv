@@ -141,6 +141,8 @@
 	Content-Aware Fill…	İçeriğe Duyarlı Dolgu…
 	Generative Fill…	Üretken Dolgu…
 	Generative Remove	Üretken Kaldırma
+	(not configured)	(yapılandırılmadı)
+	Set up a ComfyUI or AUTOMATIC1111 server in Preferences › Integrations first.	Önce Tercihler › Entegrasyonlar altında bir ComfyUI veya AUTOMATIC1111 sunucusu ayarlayın.
 	Refresh	Yenile
 	Automatic (the server's choice)	Otomatik (sunucunun seçimi)
 	Generative Fill needs a selection on a pixel layer	Üretken Dolgu için piksel katmanında bir seçim gerekir

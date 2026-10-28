@@ -160,6 +160,8 @@
 	Content-Aware Fill…	Isi Content-Aware…
 	Generative Fill…	Isi Generatif…
 	Generative Remove	Hapus Generatif
+	(not configured)	(belum diatur)
+	Set up a ComfyUI or AUTOMATIC1111 server in Preferences › Integrations first.	Siapkan dulu server ComfyUI atau AUTOMATIC1111 di Preferensi › Integrasi.
 	Refresh	Segarkan
 	Automatic (the server's choice)	Otomatis (pilihan server)
 	Generative Fill needs a selection on a pixel layer	Isi Generatif memerlukan seleksi pada layer piksel

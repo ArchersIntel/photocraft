@@ -70,7 +70,7 @@ Right-click with a Marquee, Lasso, Polygonal Lasso, Magic Wand or Object Selecti
 | Filter | Last Filter | `filter.lastFilter` |
 | Fade | Fade… | `edit.fade` |
 
-Generative Fill… runs `edit.generativeFill` (a dialog) and Generative Remove runs `edit.generativeRemove` (one click, no dialog) against a self-hosted inpainting server on this machine or a private network (loopback, RFC 1918, link-local, unique-local IPv6 or Tailscale addresses only; see `docs/generative-fill.md`). With nothing selected the menu offers Select All, Reselect, Color Range… and Load Selection… (`NO_SELECTION_MENU`). Adobe-adjacent sources document Color Range there; the other rows are **inferred** until a dated capture confirms them.
+Generative Fill… runs `edit.generativeFill` (a dialog) and Generative Remove runs `edit.generativeRemove` (one click, no dialog) against a self-hosted inpainting server on this machine or a private network (greyed with "(not configured)" until a host is set in Preferences › Integrations) (loopback, RFC 1918, link-local, unique-local IPv6 or Tailscale addresses only; see `docs/generative-fill.md`). With nothing selected the menu offers Select All, Reselect, Color Range… and Load Selection… (`NO_SELECTION_MENU`). Adobe-adjacent sources document Color Range there; the other rows are **inferred** until a dated capture confirms them.
 
 ## Panel and workspace matrix
 

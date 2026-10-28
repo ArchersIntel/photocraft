@@ -2,7 +2,8 @@
 
 > **Last reviewed:** 2026-10-15 · **Last updated:** 2026-10-15 · **Change:** minor (new feature)
 
-Right-click a selection with a selection tool: **Generative Fill…** opens a dialog with a prompt;
+Right-click a selection with a selection tool: **Generative Fill…** opens a dialog with a prompt and
+a model;
 **Generative Remove** takes the selection out in one click and lets the model continue the
 surroundings. Both are engine commands (`edit.generativeFill`, `edit.generativeRemove`;
 `edit.generativeFill.models` lists the server's models), so agents, the CLI and the control
@@ -27,6 +28,17 @@ running PhotoCraft (start it with `--listen`).
 For FLUX.1 Fill, ComfyUI needs the `ComfyUI-GGUF` node (for GGUF files), `clip_l`, `t5xxl` and the
 Flux VAE. A missing file is named in the error. The FLUX.1 \[dev] weights are under Black Forest
 Labs' non-commercial license.
+
+## Set it up first (opt-in)
+
+Both commands stay greyed in the selection menu, marked "(not configured)", until a server is set
+up: Edit › Preferences › Integrations, **Generative Fill host** (or `PHOTOCRAFT_GENFILL_URL`). A
+server on the same computer needs its address too, e.g. `127.0.0.1:8188`. A command given an
+explicit `host` parameter (an agent, the CLI) runs without it.
+
+The dialog shows the prompt, model, edge softness and colour match, and output. Server override,
+negative prompt, steps, guidance, strength, resolution and seed sit in a collapsed **Advanced**
+section.
 
 ## Settings
 

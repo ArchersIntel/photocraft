@@ -689,3 +689,17 @@ fn the_session_free_lookup_echoes_the_server_it_asked() {
     assert!(lookup_models("a1111", "8.8.8.8:7860").unwrap_err().to_string().contains("local network"));
     assert!(lookup_models("a1111", "127.0.0.1:7860/a b").unwrap_err().to_string().contains("may contain only"));
 }
+
+/// Menus offer the fill only once a server is set up; a saved host (or the environment's) does it,
+/// blank or whitespace does not, and a command with its own `host` runs regardless.
+#[test]
+fn a_server_counts_as_configured_once_a_host_is_saved() {
+    let mut s = session();
+    if std::env::var(HOST_ENV).is_err() {
+        assert!(!is_configured(&s));
+        s.execute("prefs.set", json!({"path": "integrations.generativeFillHost", "value": "   "})).unwrap();
+        assert!(!is_configured(&s), "whitespace is no host");
+    }
+    s.execute("prefs.set", json!({"path": "integrations.generativeFillHost", "value": "192.168.1.20:8188"})).unwrap();
+    assert!(is_configured(&s));
+}

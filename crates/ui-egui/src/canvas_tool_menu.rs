@@ -371,6 +371,12 @@ pub const VIEW_MENU: &[Row] = &[
 /// the view itself.
 pub const FILL_SCREEN: &str = "view.fillScreen";
 
+/// Generative Fill and Remove are listed, greyed, until a server is set up in Preferences ›
+/// Integrations.
+fn needs_genfill_setup(app: &PhotocraftApp, command: &str) -> bool {
+    matches!(command, "edit.generativeFill" | "edit.generativeRemove") && !photocraft_engine::generative_fill_cmds::is_configured(&app.session)
+}
+
 /// Photoshop's selection-tool context menu with an active selection, in its order. Generative Fill
 /// runs a locally hosted inpainting model (`generative_fill_cmds`). Rows stay visible and grey out exactly like
 /// their menu-bar twins.
@@ -777,6 +783,9 @@ fn choose_pasteboard(app: &mut PhotocraftApp, menu: &CanvasToolMenu, command: &s
 }
 
 pub fn entry_enabled(app: &PhotocraftApp, menu: &CanvasToolMenu, command: &str) -> bool {
+    if needs_genfill_setup(app, command) {
+        return false;
+    }
     if menu.crop.is_some() {
         return crop_enabled(app, menu, command);
     }
@@ -1163,8 +1172,13 @@ pub fn show(app: &mut PhotocraftApp, ctx: &Context) {
                         ui.separator();
                         continue;
                     };
-                    let item = egui::Button::selectable(mode_checked(app, &menu, command), tl!(label)).min_size(egui::vec2(200.0, 20.0));
-                    if ui.add_enabled(entry_enabled(app, &menu, command), item).clicked() {
+                    let setup = needs_genfill_setup(app, command);
+                    let text = if setup { format!("{} {}", tl!(label), tl!("(not configured)")) } else { tl!(label).to_string() };
+                    let item = egui::Button::selectable(mode_checked(app, &menu, command), text).min_size(egui::vec2(200.0, 20.0));
+                    let response = ui.add_enabled(entry_enabled(app, &menu, command), item);
+                    if setup {
+                        response.on_disabled_hover_text(tl!("Set up a ComfyUI or AUTOMATIC1111 server in Preferences › Integrations first."));
+                    } else if response.clicked() {
                         selected = Some((*command).to_string());
                     }
                 }
@@ -1609,6 +1623,29 @@ mod tests {
         let items = crate::menus::menu_items(&app);
         for (label, id) in [SELECTION_MENU, NO_SELECTION_MENU, PEN_MENU, TRANSFORM_MENU].into_iter().flatten().flatten() {
             assert!(items.iter().any(|i| i.id == *id) || photocraft_engine::commands::find(id).is_some(), "{label}: unknown command {id}");
+        }
+    }
+
+    /// Generative Fill and Remove are listed but greyed until a server is set up, and live once a
+    /// host is saved (they never offer an unconfigured server as the normal workflow).
+    #[test]
+    fn generative_rows_are_greyed_until_a_server_is_configured() {
+        let mut app = app();
+        app.ui.tool = Tool::RectMarquee;
+        app.run("select.rect", json!({"x": 1, "y": 1, "width": 8, "height": 8})).unwrap();
+        assert!(open(&mut app, &Context::default(), Tool::RectMarquee, [10.0, 10.0]));
+        let menu = app.ui.canvas_tool_menu.clone().unwrap();
+        let env_set = std::env::var(photocraft_engine::generative_fill_cmds::HOST_ENV).is_ok_and(|v| !v.trim().is_empty());
+        if !env_set {
+            for id in ["edit.generativeFill", "edit.generativeRemove"] {
+                assert!(rows(&menu).iter().flatten().any(|(_, c)| *c == id), "{id} stays listed");
+                assert!(!entry_enabled(&app, &menu, id), "{id} is greyed without a server");
+            }
+            assert!(entry_enabled(&app, &menu, "edit.fill"), "other rows are untouched");
+        }
+        app.run("prefs.set", json!({"path": "integrations.generativeFillHost", "value": "192.168.1.20:8188"})).unwrap();
+        for id in ["edit.generativeFill", "edit.generativeRemove"] {
+            assert!(entry_enabled(&app, &menu, id), "{id} is live once a host is saved");
         }
     }
 

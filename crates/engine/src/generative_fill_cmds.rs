@@ -828,6 +828,14 @@ fn default_host(backend: Backend) -> String {
     format!("127.0.0.1:{}", backend.default_port())
 }
 
+/// Whether a Generative Fill server has been set up: a host in Preferences › Integrations or in
+/// the environment. Menus offer the fill only then (it stays listed, greyed, with a note); a
+/// command given an explicit `host` still runs without it.
+pub fn is_configured(s: &Session) -> bool {
+    let set = |v: &str| !v.trim().is_empty();
+    std::env::var(HOST_ENV).is_ok_and(|v| set(&v)) || set(&s.prefs().integrations.generative_fill_host)
+}
+
 /// The backend (`comfyui` or `a1111`) and host text a fill with these parameters would use, so a
 /// dialog can show, and then submit, the very server it asked about (parameters, then the
 /// environment, then Preferences). Nothing is resolved or contacted.

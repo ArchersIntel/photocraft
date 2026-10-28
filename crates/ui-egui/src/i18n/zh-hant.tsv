@@ -172,6 +172,8 @@
 	Content-Aware Fill…	內容感知填滿…
 	Generative Fill…	生成式填滿…
 	Generative Remove	生成式移除
+	(not configured)	（未設定）
+	Set up a ComfyUI or AUTOMATIC1111 server in Preferences › Integrations first.	請先在「偏好設定 › 整合」中設定 ComfyUI 或 AUTOMATIC1111 伺服器。
 	Refresh	重新整理
 	Automatic (the server's choice)	自動（由伺服器選擇）
 	Generative Fill needs a selection on a pixel layer	生成式填滿需要在像素圖層上建立選取範圍

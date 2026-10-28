@@ -132,6 +132,8 @@
 	Content-Aware Fill…	Заливка с учётом содержимого…
 	Generative Fill…	Генеративная заливка…
 	Generative Remove	Генеративное удаление
+	(not configured)	(не настроено)
+	Set up a ComfyUI or AUTOMATIC1111 server in Preferences › Integrations first.	Сначала настройте сервер ComfyUI или AUTOMATIC1111 в Настройки › Интеграции.
 	Refresh	Обновить
 	Automatic (the server's choice)	Автоматически (выбор сервера)
 	Generative Fill needs a selection on a pixel layer	Для генеративной заливки нужно выделение на пиксельном слое
