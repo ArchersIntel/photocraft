@@ -439,7 +439,8 @@ fn field_rows(ui: &mut egui::Ui, section: &str, obj: &mut Map<String, Value>, ke
             // else an inpainting model). Without a list (no server answered) a text box.
             Value::String(s) if path == "integrations.generativeFillModel" => {
                 ui.label(RichText::new(tl!(&label)).color(t.text_dim));
-                let (models, note): (Vec<String>, String) = ui.ctx().data(|d| d.get_temp(egui::Id::unique(super::generative_fill::GF_MODELS_ID))).unwrap_or_default();
+                let (models, note): (Vec<String>, String) =
+                    ui.ctx().data(|d| d.get_temp(egui::Id::unique(super::generative_fill::GF_MODELS_ID))).unwrap_or_default();
                 let mut cur = s.clone();
                 ui.vertical(|ui| {
                     ui.horizontal(|ui| {

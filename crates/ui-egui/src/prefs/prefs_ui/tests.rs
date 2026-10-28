@@ -2213,11 +2213,7 @@ fn changing_the_dialogs_server_asks_the_new_one_and_ignores_the_old_answer() {
     let fields = dialog_fields(&app, d);
     assert!(!fields["__spec"].as_str().unwrap().contains("old-a"), "{:?}", fields["__spec"]);
     assert_eq!(fields["model"], "new-b-inpaint.safetensors");
-    assert!(
-        fields["__note"].as_str().unwrap().contains(&new) || fields["__note"].as_str().unwrap().starts_with("2 models found"),
-        "{:?}",
-        fields["__note"]
-    );
+    assert!(fields["__note"].as_str().unwrap().contains(&new) || fields["__note"].as_str().unwrap().starts_with("2 models found"), "{:?}", fields["__note"]);
     new_server.join().unwrap();
     old_server.join().unwrap();
 }

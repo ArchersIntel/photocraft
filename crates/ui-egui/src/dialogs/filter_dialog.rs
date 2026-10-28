@@ -826,7 +826,10 @@ pub fn body(ui: &mut egui::Ui, f: &mut Map<String, Value>) {
     let (main, advanced): (Vec<Param>, Vec<Param>) = parse_spec(&spec).into_iter().partition(|p| !is_advanced_param(&cmd, &p.key));
     param_rows(ui, f, &cmd, &t, main);
     if !advanced.is_empty() {
-        egui::CollapsingHeader::new(tl!("Advanced")).id_salt(format!("flt-advanced-{cmd}")).default_open(false).show(ui, |ui| param_rows(ui, f, &cmd, &t, advanced));
+        egui::CollapsingHeader::new(tl!("Advanced"))
+            .id_salt(format!("flt-advanced-{cmd}"))
+            .default_open(false)
+            .show(ui, |ui| param_rows(ui, f, &cmd, &t, advanced));
     }
     if cmd == REPLACE_COLOR {
         replace_color_result(ui, f);
@@ -845,7 +848,8 @@ pub fn body(ui: &mut egui::Ui, f: &mut Map<String, Value>) {
 
 /// Whether `key` of `cmd` belongs in the dialog's collapsed Advanced section.
 pub(crate) fn is_advanced_param(cmd: &str, key: &str) -> bool {
-    matches!(cmd, "edit.generativeFill" | "edit.generativeRemove") && matches!(key, "negativePrompt" | "backend" | "host" | "steps" | "guidance" | "strength" | "resolution" | "seed")
+    matches!(cmd, "edit.generativeFill" | "edit.generativeRemove")
+        && matches!(key, "negativePrompt" | "backend" | "host" | "steps" | "guidance" | "strength" | "resolution" | "seed")
 }
 
 /// The rows for `params` of the dialog for `cmd`.
